@@ -1,0 +1,944 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, StatusBar, Platform, Alert, Modal } from 'react-native';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
+import * as Location from 'expo-location';
+import { formatDuration, formatPace, formatDistance } from '../utils/formatters';
+import NetInfo from '@react-native-community/netinfo';
+import { saveHikeToLocalDB, syncUnsentHikes, getAllHikes } from '../services/databaseService';
+import HikeStats from '../components/HikeStats';
+
+export default function TrackingScreen({ navigation }) {
+  const [tracking, setTracking] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [routeCoordinates, setRouteCoordinates] = useState([]);
+  const [stats, setStats] = useState({
+    distance: 0,       // in meters
+    duration: 0,       // in seconds
+    pace: 0,           // in minutes per km
+    elevation: 0,      // in meters
+    currentSpeed: 0,   // in m/s
+  });
+  const [saveModalVisible, setSaveModalVisible] = useState(false);
+  const [isConnected, setIsConnected] = useState(true);
+  
+  const mapRef = useRef(null)
+  const locationSubscription = useRef(null)
+  const timerRef = useRef(null)
+  const startTimeRef = useRef(null)
+  const pausedTimeRef = useRef(0)  // For tracking total paused time
+  const pauseStartTimeRef = useRef(null) // When pause started
+  const initialAltitudeRef = useRef(null)
+  const prevCoordinatesRef = useRef([])
+  const lastValidDistanceRef = useRef(0) // To prevent erroneous distance jumps
+  const lastStatsRef = useRef({}) // Store stats at pause time
+
+  useEffect(() => {
+    (async () => {
+      // Request both foreground and background permissions
+      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync()
+      
+      if (foregroundStatus !== 'granted') {
+        Alert.alert('Permission Denied', 'Please grant location permissions to use the tracking feature.')
+        navigation.goBack()
+        return
+      }
+      
+      // Background permissions are optional but helpful
+      if (Platform.OS === 'ios' || Platform.OS === 'android') {
+        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync()
+        if (backgroundStatus !== 'granted') {
+          Alert.alert('Limited Functionality', 
+            'Background location permission not granted. Tracking may stop when app is in background.')
+        }
+      }
+      
+      // Get initial location with more retries
+      try {
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Highest,
+          timeout: 15000, // 15 second timeout
+        });
+        
+        setCurrentLocation(location.coords);
+        // Store initial altitude
+        initialAltitudeRef.current = location.coords.altitude || 0;
+        
+        // Pre-populate first coordinate for route drawing
+        prevCoordinatesRef.current = [{
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude
+        }];
+      } catch (error) {
+        console.error('Initial location error:', error);
+        Alert.alert('Error', 'Could not get your current location. Please check your GPS settings and try again.')
+      }
+    })();
+    
+    // Subscribe to network state updates
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsConnected(state.isConnected);
+    });
+    
+    // Check initial connection status
+    NetInfo.fetch().then(state => {
+      setIsConnected(state.isConnected);
+    });
+    
+    // Cleanup
+    return () => {
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+      }
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      unsubscribe(); // Unsubscribe from network state updates
+    }
+  }, []);
+
+  const startTracking = async () => {
+    try {
+      if (!currentLocation) {
+        Alert.alert('Error', 'Cannot start tracking without location. Please wait for GPS signal.');
+        return;
+      }
+      
+      // Reset values but initialize with current location
+      const initialCoord = {
+        latitude: currentLocation.latitude, 
+        longitude: currentLocation.longitude
+      };
+      
+      setRouteCoordinates([initialCoord]);
+      prevCoordinatesRef.current = [initialCoord];
+      lastValidDistanceRef.current = 0;
+      
+      const initialStats = {
+        distance: 0,
+        duration: 0,
+        pace: 0,
+        elevation: 0,
+        currentSpeed: 0,
+      };
+      
+      setStats(initialStats);
+      lastStatsRef.current = {...initialStats};
+      
+      startTimeRef.current = new Date().getTime();
+      pausedTimeRef.current = 0;
+      initialAltitudeRef.current = currentLocation.altitude || 0;
+      
+      // Use subscription-based tracking
+      startLocationTracking();
+      
+      // Start timer for duration updates
+      startTimer();
+      
+      setTracking(true);
+      setPaused(false);
+      
+      console.log('Tracking started');
+    } catch (error) {
+      Alert.alert('Error', 'Could not start tracking. Please check your GPS signal and try again.');
+      console.error('Start tracking error:', error);
+    }
+  };
+
+  const startLocationTracking = async () => {
+    // Remove any existing subscription first
+    if (locationSubscription.current) {
+      locationSubscription.current.remove();
+    }
+    
+    locationSubscription.current = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.BestForNavigation,
+        distanceInterval: 5, // update every 5 meters
+        timeInterval: 1000,  // or at least every 1 second
+      },
+      (location) => {
+        if (paused) return; // Don't update if paused
+        
+        const { latitude, longitude, altitude, speed } = location.coords;
+        
+        setCurrentLocation(location.coords);
+        
+        const newCoord = { latitude, longitude };
+        
+        // Update route on the map
+        setRouteCoordinates(prevCoords => [...prevCoords, newCoord]);
+        
+        // Calculate new distance based on the previous coordinate
+        if (prevCoordinatesRef.current.length > 0) {
+          const lastCoord = prevCoordinatesRef.current[prevCoordinatesRef.current.length - 1];
+          
+          const newDistance = calculateDistance(
+            lastCoord.latitude, 
+            lastCoord.longitude, 
+            latitude, 
+            longitude
+          );
+          
+          // Only update if we moved a reasonable distance (reduces GPS jitter)
+          // Also check for unrealistic jumps in distance (more than 100m instantly)
+          if (newDistance > 1 && newDistance < 100) {
+            lastValidDistanceRef.current += newDistance;
+            
+            setStats(prevStats => {
+              const newTotalDistance = lastValidDistanceRef.current;
+              const newDuration = (new Date().getTime() - startTimeRef.current - pausedTimeRef.current) / 1000;
+              
+              // Calculate pace (minutes per km)
+              const newPace = newTotalDistance > 0 ? (newDuration / 60) / (newTotalDistance / 1000) : 0;
+              
+              // Calculate elevation gain - only positive changes
+              const elevationChange = 
+                altitude && altitude > initialAltitudeRef.current ? 
+                altitude - initialAltitudeRef.current : 0;
+              
+              const newStats = {
+                distance: newTotalDistance,
+                duration: newDuration,
+                pace: newPace,
+                elevation: elevationChange,
+                currentSpeed: speed || 0,
+              };
+              
+              // Update the last stats reference
+              lastStatsRef.current = {...newStats};
+              
+              return newStats;
+            });
+            
+            // Store the new coordinate for next calculation
+            prevCoordinatesRef.current.push(newCoord);
+          }
+        }
+        
+        // Center map on current location
+        if (mapRef.current) {
+          mapRef.current.animateToRegion({
+            latitude,
+            longitude,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+          }, 500);
+        }
+      }
+    );
+  };
+
+  const startTimer = () => {
+    // Clear existing timer if any
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+    
+    timerRef.current = setInterval(() => {
+      if (paused) return; // Don't update if paused
+      
+      const currentTime = new Date().getTime();
+      const elapsedSeconds = (currentTime - startTimeRef.current - pausedTimeRef.current) / 1000;
+      
+      setStats(prevStats => {
+        const newStats = {
+          ...prevStats,
+          duration: elapsedSeconds,
+          // Recalculate pace
+          pace: prevStats.distance > 0 ? (elapsedSeconds / 60) / (prevStats.distance / 1000) : 0
+        };
+        
+        // Update the last stats reference
+        lastStatsRef.current = {...newStats};
+        
+        return newStats;
+      });
+    }, 1000);
+  };
+
+  const pauseTracking = () => {
+    if (paused) {
+      // Resume tracking
+      console.log('Resuming tracking');
+      
+      // Calculate how long we were paused and add to total pause time
+      const pauseDuration = new Date().getTime() - pauseStartTimeRef.current;
+      pausedTimeRef.current += pauseDuration;
+      
+      // Restart location tracking and timer
+      startLocationTracking();
+      startTimer();
+      
+      setPaused(false);
+    } else {
+      // Pause tracking
+      console.log('Pausing tracking');
+      
+      // Store when we paused
+      pauseStartTimeRef.current = new Date().getTime();
+      
+      // Stop location updates and timer
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+        locationSubscription.current = null;
+      }
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
+      // Save current stats
+      lastStatsRef.current = {...stats};
+      
+      setPaused(true);
+    }
+  };
+
+  const stopTracking = () => {
+    // Clean up all tracking resources
+    if (locationSubscription.current) {
+      locationSubscription.current.remove();
+      locationSubscription.current = null;
+    }
+    
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    setTracking(false);
+    setPaused(false);
+    
+    // Only show save option if we tracked something meaningful
+    if (routeCoordinates.length > 5 && stats.distance > 10) {
+      setSaveModalVisible(true);
+    } else {
+      Alert.alert('Tracking Stopped', 'Your tracking session was too short to save.');
+    }
+  };
+
+  // Update the save function to include more logging
+  const handleSaveHike = async () => {
+    try {
+      // Validate route data
+      if (!routeCoordinates || routeCoordinates.length < 2) {
+        Alert.alert('Error', 'Not enough tracking data to save. Please record a longer hike.');
+        return;
+      }
+      
+      // Prepare hike data
+      const hikeData = {
+        date: new Date().toISOString(),
+        routeCoordinates,
+        stats: {
+          distance: stats.distance || 0,
+          duration: stats.duration || 0,
+          pace: stats.pace || 0,
+          elevation: stats.elevation || 0
+        }
+      };
+      
+      console.log('About to save hike with data:', {
+        date: hikeData.date,
+        distance: hikeData.stats.distance,
+        routePoints: hikeData.routeCoordinates.length
+      });
+      
+      // Save to local storage
+      try {
+        console.log('Saving hike locally...');
+        const localSaveId = await saveHikeToLocalDB(hikeData);
+        console.log('Successfully saved hike with ID:', localSaveId);
+        
+        // After saving, check if it was actually saved
+        const allHikes = await getAllHikes();
+        console.log(`Total hikes in storage after save: ${allHikes.length}`);
+        
+        Alert.alert(
+          'Hike Saved Successfully', 
+          `Your hike has been saved locally. ID: ${localSaveId}`,
+          [{ text: 'OK', onPress: () => {
+            setSaveModalVisible(false);
+            navigation.goBack();
+          }}]
+        );
+      } catch (error) {
+        console.error('Failed to save hike:', error);
+        Alert.alert(
+          'Error', 
+          'Could not save your hike. Please try again.'
+        );
+      }
+    } catch (error) {
+      console.error('Save operation error:', error);
+      Alert.alert('Error', 'An unexpected error occurred.');
+    }
+  };
+
+  const handleDiscardHike = () => {
+    setSaveModalVisible(false);
+    navigation.goBack();
+  };
+
+  // Haversine formula to calculate distance between two points
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // Earth radius in meters
+    const φ1 = lat1 * Math.PI/180;
+    const φ2 = lat2 * Math.PI/180;
+    const Δφ = (lat2-lat1) * Math.PI/180;
+    const Δλ = (lon2-lon1) * Math.PI/180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c;
+
+    return distance; // in meters
+  };
+
+  const renderStatsSection = () => {
+    return (
+      <View style={styles.statsSection}>
+        <HikeStats stats={stats} />
+      </View>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      
+      <View style={styles.mapContainer}>
+        {currentLocation ? (
+          <MapView
+            ref={mapRef}
+            style={styles.map}
+            provider={PROVIDER_GOOGLE}
+            initialRegion={{
+              latitude: currentLocation.latitude,
+              longitude: currentLocation.longitude,
+              latitudeDelta: 0.005,
+              longitudeDelta: 0.005,
+            }}
+            showsUserLocation={true}
+            followsUserLocation={tracking && !paused}
+            scrollEnabled={true}
+            zoomEnabled={true}
+            showsCompass={true}
+            showsScale={true}
+            mapType="standard"
+          >
+            {routeCoordinates.length > 0 && (
+              <Polyline
+                coordinates={routeCoordinates}
+                strokeWidth={4}
+                strokeColor="#FC4C02"
+                lineCap="round"
+                lineJoin="round"
+              />
+            )}
+            
+            {/* Start marker with custom callout */}
+            {tracking && routeCoordinates.length > 0 && (
+              <Marker
+                coordinate={routeCoordinates[0]}
+                title="Start"
+                description="Your journey began here"
+                pinColor="green"
+              />
+            )}
+          </MapView>
+        ) : (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Getting your location...</Text>
+          </View>
+        )}
+        
+        {/* Map overlay for current stats summary */}
+        {tracking && !paused && (
+          <View style={styles.mapOverlay}>
+            <Text style={styles.mapOverlayText}>
+              {formatDistance(stats.distance)} • {formatDuration(stats.duration)}
+            </Text>
+          </View>
+        )}
+      </View>
+      
+      <View style={styles.statsContainer}>
+        <HikeStats stats={stats} />
+      </View>
+      
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity 
+          style={styles.backButton} 
+          onPress={() => {
+            if (tracking) {
+              Alert.alert(
+                'Stop Tracking?',
+                'Are you sure you want to stop tracking? Your current session will be lost unless you save it.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Stop', style: 'destructive', onPress: () => {
+                    stopTracking();
+                  }}
+                ]
+              );
+            } else {
+              navigation.goBack();
+            }
+          }}
+        >
+          <Ionicons name="arrow-back" size={24} color="white" />
+        </TouchableOpacity>
+        
+        {!tracking ? (
+          <TouchableOpacity 
+            style={styles.trackButton} 
+            onPress={startTracking}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.trackButtonText}>Start Tracking</Text>
+            <Ionicons name="play" size={20} color="white" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.trackingButtonsContainer}>
+            {/* Pause/Resume button */}
+            <TouchableOpacity 
+              style={[styles.actionButton, paused ? styles.resumeButton : styles.pauseButton]} 
+              onPress={pauseTracking}
+              activeOpacity={0.8}
+            >
+              <Ionicons name={paused ? "play" : "pause"} size={22} color="white" />
+              <Text style={styles.actionButtonText}>{paused ? "Resume" : "Pause"}</Text>
+            </TouchableOpacity>
+            
+            {/* Stop button */}
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.stopButton]} 
+              onPress={stopTracking}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="stop" size={22} color="white" />
+              <Text style={styles.actionButtonText}>Stop</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+      
+      {/* Enhanced Save Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={saveModalVisible}
+        onRequestClose={() => setSaveModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Save Your Hike</Text>
+              <MaterialIcons name="hiking" size={28} color="#FC4C02" />
+            </View>
+            
+            <View style={styles.modalStatsContainer}>
+              <View style={styles.modalStatRow}>
+                <View style={styles.modalStatItem}>
+                  <Ionicons name="speedometer-outline" size={22} color="#555" />
+                  <Text style={styles.modalStatLabel}>Distance</Text>
+                  <Text style={styles.modalStatValue}>{formatDistance(stats.distance)}</Text>
+                </View>
+                
+                <View style={styles.modalStatItem}>
+                  <Ionicons name="time-outline" size={22} color="#555" />
+                  <Text style={styles.modalStatLabel}>Duration</Text>
+                  <Text style={styles.modalStatValue}>{formatDuration(stats.duration)}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.modalStatRow}>
+                <View style={styles.modalStatItem}>
+                  <MaterialIcons name="speed" size={22} color="#555" />
+                  <Text style={styles.modalStatLabel}>Pace</Text>
+                  <Text style={styles.modalStatValue}>{formatPace(stats.pace)}</Text>
+                </View>
+                
+                <View style={styles.modalStatItem}>
+                  <MaterialIcons name="terrain" size={22} color="#555" />
+                  <Text style={styles.modalStatLabel}>Elevation</Text>
+                  <Text style={styles.modalStatValue}>{stats.elevation.toFixed(1)}m</Text>
+                </View>
+              </View>
+            </View>
+            
+            <View style={styles.modalButtonsContainer}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.discardButton]}
+                onPress={handleDiscardHike}
+              >
+                <Text style={styles.discardButtonText}>Discard</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleSaveHike}
+              >
+                <Text style={styles.saveButtonText}>Save Hike</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Enhanced Paused overlay */}
+      {paused && tracking && (
+        <View style={styles.pausedOverlay}>
+          <View style={styles.pausedContent}>
+            <Text style={styles.pausedText}>PAUSED</Text>
+            <View style={styles.pausedStatsContainer}>
+              <View style={styles.pausedStatRow}>
+                <Ionicons name="speedometer-outline" size={20} color="#388E3C" />
+                <Text style={styles.pausedStat}>{formatDistance(stats.distance)}</Text>
+              </View>
+              
+              <View style={styles.pausedStatRow}>
+                <Ionicons name="time-outline" size={20} color="#388E3C" />
+                <Text style={styles.pausedStat}>{formatDuration(stats.duration)}</Text>
+              </View>
+              
+              <View style={styles.pausedStatRow}>
+                <MaterialIcons name="speed" size={20} color="#388E3C" />
+                <Text style={styles.pausedStat}>{formatPace(stats.pace)}</Text>
+              </View>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.resumeOverlayButton}
+              onPress={pauseTracking}
+              activeOpacity={0.9}
+            >
+              <Ionicons name="play" size={24} color="white" />
+              <Text style={styles.resumeButtonText}>RESUME</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+      
+      {/* Connection Status Indicator */}
+      {!isConnected && (
+        <View style={styles.offlineIndicator}>
+          <Text style={styles.offlineText}>Offline Mode</Text>
+        </View>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#212121', // Dark background for minimalist look
+  },
+  mapContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  map: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#212121', // Dark background
+  },
+  loadingText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  mapOverlay: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 40,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(33, 33, 33, 0.85)', // Dark with transparency
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 0, // Remove border for minimal look
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  mapOverlayText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  statsContainer: {
+    backgroundColor: '#212121', // Dark background
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)', // Very subtle border
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#181818', // Even darker background for contrast
+    borderTopWidth: 0, // Remove border for cleaner look
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)', // Very subtle background
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  trackButton: {
+    flexDirection: 'row',
+    backgroundColor: '#388E3C', // Green for primary action
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 30,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  trackingButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 25,
+    marginLeft: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  actionButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    marginLeft: 6,
+    fontSize: 14,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  pauseButton: {
+    backgroundColor: '#FFA000', // Amber for pause
+  },
+  resumeButton: {
+    backgroundColor: '#388E3C', // Green for resume
+  },
+  stopButton: {
+    backgroundColor: '#F44336', // Red for stop
+  },
+  trackButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
+    marginRight: 8,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  },
+  modalContent: {
+    width: '85%',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 0,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eeeeee',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#212121', // Dark text
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  modalStatsContainer: {
+    padding: 24,
+  },
+  modalStatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  modalStatItem: {
+    alignItems: 'center',
+    width: '48%',
+  },
+  modalStatLabel: {
+    fontSize: 14,
+    color: '#757575', // Medium gray
+    marginTop: 4,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  modalStatValue: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#212121', // Dark text
+    marginTop: 6,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  modalButtonsContainer: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#eeeeee',
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  discardButton: {
+    backgroundColor: '#f9f9f9',
+    borderRightWidth: 0.5,
+    borderRightColor: '#eeeeee',
+  },
+  saveButton: {
+    backgroundColor: '#388E3C', // Green for save
+    borderLeftWidth: 0.5,
+    borderLeftColor: '#eeeeee',
+  },
+  discardButtonText: {
+    color: '#616161', // Medium gray
+    fontWeight: '600',
+    fontSize: 16,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  saveButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  pausedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  pausedContent: {
+    width: '85%',
+    alignItems: 'center',
+    backgroundColor: 'rgba(33, 33, 33, 0.95)', // Dark with slight transparency
+    borderRadius: 20,
+    padding: 28,
+    borderWidth: 0, // Remove border for minimal look
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  pausedText: {
+    color: 'white',
+    fontSize: 28,
+    fontWeight: '700',
+    marginBottom: 28,
+    letterSpacing: 2,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  pausedStatsContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)', // Very subtle background
+    borderRadius: 16, 
+    padding: 20,
+    marginBottom: 30,
+    width: '100%',
+  },
+  pausedStatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  pausedStat: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '500',
+    marginLeft: 14,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  resumeOverlayButton: {
+    flexDirection: 'row',
+    backgroundColor: '#388E3C', // Green for resume
+    paddingHorizontal: 28,
+    paddingVertical: 16,
+    borderRadius: 30,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  resumeButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
+    marginLeft: 8,
+    letterSpacing: 1,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  offlineIndicator: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 40 : 30,
+    right: 15,
+    backgroundColor: 'rgba(255, 152, 0, 0.9)', // Orange with transparency
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    zIndex: 100,
+  },
+  offlineText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+})
