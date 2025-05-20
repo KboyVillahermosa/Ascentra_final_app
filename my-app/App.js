@@ -6,8 +6,6 @@ import { supabase } from './utils/supabase';
 import * as Linking from 'expo-linking';
 import * as SecureStore from 'expo-secure-store';
 import { linking } from './utils/linking';
-import { initDatabase, syncUnsentHikes } from './services/databaseService';
-import NetInfo from '@react-native-community/netinfo';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -24,6 +22,7 @@ import ProfileScreen from './screens/ProfileScreen';
 import EditProfileScreen from './screens/EditProfileScreen';
 import ChangePasswordScreen from './screens/ChangePasswordScreen';
 import MediaViewerScreen from './screens/MediaViewerScreen';
+import SaveActivityScreen from './screens/SaveActivityScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -159,25 +158,6 @@ export default function App() {
     return () => subscription.remove();
   }, []);
 
-  useEffect(() => {
-    // Initialize database with better error handling
-    initDatabase()
-      .then(() => console.log('Database initialized successfully'))
-      .catch(error => {
-        console.error('Database initialization error:', error);
-        // Continue app execution even if database fails
-      });
-    
-    // Try to sync any pending hikes when app starts and has connectivity
-    NetInfo.fetch().then(state => {
-      if (state.isConnected) {
-        syncUnsentHikes()
-          .then(result => console.log('Initial sync result:', result))
-          .catch(error => console.error('Initial sync error:', error));
-      }
-    });
-  }, []);
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -190,7 +170,7 @@ export default function App() {
   // For debugging purposes, log the screens we have available
   console.log("Available screens in navigator:", [
     "Home", "HikingSpotDetails", "ActivityDetails", 
-    "Tracking", "HikeHistory", "Login", "Register", "EmailConfirmation",
+    "Tracking", "HikeHistory", "SaveActivity", "Login", "Register", "EmailConfirmation",
     "Posts", "Comments", "Profile", "EditProfile", "ChangePassword", "MediaViewer"
   ]);
 
@@ -217,6 +197,7 @@ export default function App() {
             />
             <Stack.Screen name="Tracking" component={TrackingScreen} options={{ headerShown: false }} />
             <Stack.Screen name="HikeHistory" component={HikeHistoryScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="SaveActivity" component={SaveActivityScreen} options={{ headerShown: false }} />
             <Stack.Screen 
               name="MediaViewer" 
               component={MediaViewerScreen} 
@@ -240,10 +221,6 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  map: {
-    width: '100%',
-    height: 200,
-  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -256,23 +233,3 @@ const styles = StyleSheet.create({
     color: '#2E7D32',
   },
 });
-
-const mapPlaceholder = (spot) => (
-  <MapView
-    style={styles.map}
-    initialRegion={{
-      latitude: spot?.latitude || 10.3157, // Default to Cebu coordinates
-      longitude: spot?.longitude || 123.8854,
-      latitudeDelta: 0.0922,
-      longitudeDelta: 0.0421,
-    }}
-  >
-    <Marker
-      coordinate={{
-        latitude: spot?.latitude || 10.3157,
-        longitude: spot?.longitude || 123.8854,
-      }}
-      title={spot?.name || 'Hiking Spot'}
-    />
-  </MapView>
-);

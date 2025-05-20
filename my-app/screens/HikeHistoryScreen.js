@@ -1,12 +1,76 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, SafeAreaView, StatusBar, Platform, Alert, Modal, ActivityIndicator } from 'react-native';
+import { 
+  StyleSheet, 
+  View, 
+  Text, 
+  FlatList, 
+  TouchableOpacity, 
+  SafeAreaView, 
+  StatusBar, 
+  Platform, 
+  Alert, 
+  Modal, 
+  ActivityIndicator,
+  Image
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatDate, formatDistance, formatDuration, formatPace } from '../utils/formatters';
-import { getAllHikes, debugStorage } from '../services/databaseService';
+import { getAllHikes, debugStorage, deleteHike } from '../services/databaseService';
 
 // Custom HikeHistoryItem component since we're not importing the original
-const HikeHistoryItem = ({ hike, onPress }) => {
+const HikeHistoryItem = ({ hike, onPress, onMediaPress }) => {
+  // Check if the hike has media files
+  const hasMedia = hike.media && Array.isArray(hike.media) && hike.media.length > 0;
+  
+  // Function to render media thumbnails
+  const renderMedia = () => {
+    if (!hasMedia) return null;
+    
+    // Determine how many thumbnails to show (max 3)
+    const displayCount = Math.min(hike.media.length, 3);
+    const remainingCount = hike.media.length - displayCount;
+    
+    return (
+      <View style={styles.mediaContainer}>
+        {hike.media.slice(0, displayCount).map((media, index) => {
+          const isVideo = media.type === 'video' || 
+                         (media.uri && media.uri.endsWith('.mp4'));
+          
+          return (
+            <TouchableOpacity 
+              key={index} 
+              style={styles.mediaThumbnail}
+              onPress={() => onMediaPress(hike.media, index)}
+              activeOpacity={0.9}
+            >
+              <Image 
+                source={{ uri: media.uri }} 
+                style={styles.mediaImage} 
+                resizeMode="cover"
+              />
+              
+              {isVideo && (
+                <View style={styles.videoIndicator}>
+                  <Ionicons name="play" size={16} color="white" />
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+        
+        {remainingCount > 0 && (
+          <TouchableOpacity 
+            style={[styles.mediaThumbnail, styles.moreMediaIndicator]}
+            onPress={() => onMediaPress(hike.media, displayCount)}
+          >
+            <Text style={styles.moreMediaText}>+{remainingCount}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+  
   return (
     <TouchableOpacity 
       style={styles.hikeItem} 
@@ -14,13 +78,20 @@ const HikeHistoryItem = ({ hike, onPress }) => {
       activeOpacity={0.7}
     >
       <View style={styles.hikeHeader}>
-        <Text style={styles.hikeDate}>{formatDate(hike.date)}</Text>
-        {hike.synced === 0 && (
-          <View style={styles.syncStatusBadge}>
-            <Text style={styles.syncStatusText}>Not Synced</Text>
-          </View>
-        )}
+        <Text style={styles.hikeTitle}>
+          {hike.title || 'Hiking Activity'}
+        </Text>
+        {/* Not Synced badge removed */}
       </View>
+      
+      <Text style={styles.hikeDate}>{formatDate(hike.date)}</Text>
+      
+      {hike.description ? (
+        <Text style={styles.hikeDescription} numberOfLines={2}>{hike.description}</Text>
+      ) : null}
+      
+      {/* Media gallery */}
+      {renderMedia()}
       
       <View style={styles.hikeStats}>
         <View style={styles.statItem}>
@@ -47,6 +118,11 @@ export default function HikeHistoryScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedHikeId, setSelectedHikeId] = useState(null);
+  
+  // New state for media viewer
+  const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
+  const [mediaItems, setMediaItems] = useState([]);
+  const [initialMediaIndex, setInitialMediaIndex] = useState(0);
 
   useEffect(() => {
     fetchHikeRecords();
@@ -73,6 +149,14 @@ export default function HikeHistoryScreen({ navigation }) {
       const hikes = await getAllHikes();
       console.log(`Fetched ${hikes.length} hikes from local storage`);
       
+      // Debug media content
+      hikes.forEach((hike, index) => {
+        console.log(`Hike #${index}: "${hike.title}" has ${hike.media && Array.isArray(hike.media) ? hike.media.length : 0} media items`);
+        if (hike.media && Array.isArray(hike.media) && hike.media.length > 0) {
+          console.log(`First media URI: ${hike.media[0].uri}`);
+        }
+      });
+      
       // Sort by date (newest first)
       const sortedHikes = hikes.sort((a, b) => {
         return new Date(b.date) - new Date(a.date);
@@ -91,22 +175,79 @@ export default function HikeHistoryScreen({ navigation }) {
     setSelectedHikeId(hikeId);
     setDeleteModalVisible(true);
   };
+  
+  // Handler for opening media viewer
+  const handleMediaPress = (media, index) => {
+    // You could navigate to a MediaViewer screen if you have one
+    // Or show a modal with the media
+    setMediaItems(media);
+    setInitialMediaIndex(index);
+    setMediaViewerVisible(true);
+    
+    // Alternatively, navigate to a dedicated MediaViewer screen
+    // navigation.navigate('MediaViewer', { media, initialIndex: index });
+  };
+  
+  // Simple media modal component
+  const MediaViewerModal = () => (
+    <Modal
+      animationType="fade"
+      transparent={false}
+      visible={mediaViewerVisible}
+      onRequestClose={() => setMediaViewerVisible(false)}
+    >
+      <View style={styles.mediaViewerContainer}>
+        <TouchableOpacity 
+          style={styles.mediaViewerCloseBtn}
+          onPress={() => setMediaViewerVisible(false)}
+        >
+          <Ionicons name="close" size={28} color="white" />
+        </TouchableOpacity>
+        
+        {mediaItems.length > 0 && (
+          <Image 
+            source={{ uri: mediaItems[initialMediaIndex].uri }} 
+            style={styles.fullScreenMedia}
+            resizeMode="contain"
+          />
+        )}
+        
+        {/* Navigation buttons for prev/next image */}
+        <View style={styles.mediaNavigation}>
+          <TouchableOpacity 
+            style={styles.mediaNavButton}
+            onPress={() => setInitialMediaIndex(Math.max(0, initialMediaIndex - 1))}
+            disabled={initialMediaIndex === 0}
+          >
+            <Ionicons 
+              name="chevron-back" 
+              size={32} 
+              color={initialMediaIndex === 0 ? "#555" : "white"} 
+            />
+          </TouchableOpacity>
+          
+          <Text style={styles.mediaCounter}>{initialMediaIndex + 1}/{mediaItems.length}</Text>
+          
+          <TouchableOpacity 
+            style={styles.mediaNavButton}
+            onPress={() => setInitialMediaIndex(Math.min(mediaItems.length - 1, initialMediaIndex + 1))}
+            disabled={initialMediaIndex === mediaItems.length - 1}
+          >
+            <Ionicons 
+              name="chevron-forward" 
+              size={32} 
+              color={initialMediaIndex === mediaItems.length - 1 ? "#555" : "white"} 
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 
   const confirmDeleteHike = async () => {
     try {
-      // Get current hikes
-      const hikesStr = await AsyncStorage.getItem('@ascentra_hikes');
-      if (!hikesStr) {
-        throw new Error('No hikes found in storage');
-      }
-      
-      const hikes = JSON.parse(hikesStr);
-      
-      // Filter out the one to delete
-      const updatedHikes = hikes.filter(hike => hike.id !== selectedHikeId);
-      
-      // Save back to AsyncStorage
-      await AsyncStorage.setItem('@ascentra_hikes', JSON.stringify(updatedHikes));
+      // Use the new deleteHike function
+      await deleteHike(selectedHikeId);
       
       // Update state
       setHikeRecords(prevRecords => 
@@ -159,15 +300,17 @@ export default function HikeHistoryScreen({ navigation }) {
       <HikeHistoryItem 
         hike={item} 
         onPress={() => {
-          // Instead of navigating to ActivityDetails, just show an alert for now
           Alert.alert(
-            'Hike Details',
+            item.title || 'Hike Details',
+            `${item.description ? item.description + '\n\n' : ''}` +
             `Date: ${formatDate(item.date)}\n` +
             `Distance: ${formatDistance(item.distance)}\n` +
             `Duration: ${formatDuration(item.duration)}\n` +
-            `Elevation gain: ${item.elevation?.toFixed(0)}m`
+            `Elevation gain: ${item.elevation?.toFixed(0)}m` +
+            `${item.privateNotes ? '\n\nNotes: ' + item.privateNotes : ''}`
           );
         }}
+        onMediaPress={handleMediaPress}
       />
       <TouchableOpacity 
         style={styles.deleteButton}
@@ -236,6 +379,9 @@ export default function HikeHistoryScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+      
+      {/* Media Viewer Modal */}
+      <MediaViewerModal />
     </SafeAreaView>
   );
 }
@@ -384,10 +530,92 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  hikeDate: {
-    fontSize: 16,
+  hikeTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#2c3e50',
+    color: '#212121',
+    marginBottom: 4,
+  },
+  hikeDate: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  hikeDescription: {
+    fontSize: 14,
+    color: '#555',
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  // Media display styles
+  mediaContainer: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  mediaThumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 4,
+    marginRight: 8,
+    overflow: 'hidden',
+  },
+  mediaImage: {
+    width: '100%',
+    height: '100%',
+  },
+  videoIndicator: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 12,
+    width: 22,
+    height: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  moreMediaIndicator: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  moreMediaText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  // Media viewer modal styles
+  mediaViewerContainer: {
+    flex: 1,
+    backgroundColor: 'black',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaViewerCloseBtn: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 20,
+    right: 20,
+    zIndex: 10,
+  },
+  fullScreenMedia: {
+    width: '100%',
+    height: '80%',
+  },
+  mediaNavigation: {
+    flexDirection: 'row',
+    position: 'absolute',
+    bottom: 40,
+    width: '100%',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  mediaNavButton: {
+    padding: 10,
+  },
+  mediaCounter: {
+    color: 'white',
+    fontSize: 16,
   },
   syncStatusBadge: {
     backgroundColor: '#f39c12',

@@ -312,66 +312,34 @@ export default function TrackingScreen({ navigation }) {
     setTracking(false);
     setPaused(false);
     
-    // Only show save option if we tracked something meaningful
-    if (routeCoordinates.length > 5 && stats.distance > 10) {
-      setSaveModalVisible(true);
-    } else {
-      Alert.alert('Tracking Stopped', 'Your tracking session was too short to save.');
-    }
+    // Always show save option regardless of route length or distance
+    setSaveModalVisible(true);
   };
 
-  // Update the save function to include more logging
+  // Modify the handleSaveHike function
   const handleSaveHike = async () => {
     try {
-      // Validate route data
-      if (!routeCoordinates || routeCoordinates.length < 2) {
-        Alert.alert('Error', 'Not enough tracking data to save. Please record a longer hike.');
+      // Make validation less restrictive - allow saving even with minimal data
+      if (!routeCoordinates || routeCoordinates.length < 1) {
+        // Only require at least one coordinate point
+        Alert.alert('Error', 'No tracking data available to save.');
         return;
       }
       
-      // Prepare hike data
-      const hikeData = {
-        date: new Date().toISOString(),
+      // Navigate to the SaveActivityScreen with current hike data
+      navigation.navigate('SaveActivity', {
         routeCoordinates,
         stats: {
           distance: stats.distance || 0,
           duration: stats.duration || 0,
           pace: stats.pace || 0,
           elevation: stats.elevation || 0
-        }
-      };
-      
-      console.log('About to save hike with data:', {
-        date: hikeData.date,
-        distance: hikeData.stats.distance,
-        routePoints: hikeData.routeCoordinates.length
+        },
+        date: new Date().toISOString()
       });
       
-      // Save to local storage
-      try {
-        console.log('Saving hike locally...');
-        const localSaveId = await saveHikeToLocalDB(hikeData);
-        console.log('Successfully saved hike with ID:', localSaveId);
-        
-        // After saving, check if it was actually saved
-        const allHikes = await getAllHikes();
-        console.log(`Total hikes in storage after save: ${allHikes.length}`);
-        
-        Alert.alert(
-          'Hike Saved Successfully', 
-          `Your hike has been saved locally. ID: ${localSaveId}`,
-          [{ text: 'OK', onPress: () => {
-            setSaveModalVisible(false);
-            navigation.goBack();
-          }}]
-        );
-      } catch (error) {
-        console.error('Failed to save hike:', error);
-        Alert.alert(
-          'Error', 
-          'Could not save your hike. Please try again.'
-        );
-      }
+      // Close the modal
+      setSaveModalVisible(false);
     } catch (error) {
       console.error('Save operation error:', error);
       Alert.alert('Error', 'An unexpected error occurred.');
