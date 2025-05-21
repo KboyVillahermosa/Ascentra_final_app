@@ -155,8 +155,9 @@ export default function TrackingScreen({ navigation }) {
     locationSubscription.current = await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.BestForNavigation,
-        distanceInterval: 5, // update every 5 meters
-        timeInterval: 1000,  // or at least every 1 second
+        distanceInterval: 2, // Update every 2 meters (more frequent)
+        timeInterval: 1000,  // At least every 1 second
+        mayShowUserSettingsDialog: true // Encourage best settings
       },
       (location) => {
         if (paused) return; // Don't update if paused
@@ -351,9 +352,30 @@ export default function TrackingScreen({ navigation }) {
     navigation.goBack();
   };
 
-  // Haversine formula to calculate distance between two points
+  // Replace your calculateDistance function with this more accurate version
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371e3; // Earth radius in meters
+    // More accurate Earth radius calculation based on latitude
+    const getEarthRadius = (lat) => {
+      // Earth is not a perfect sphere - radius varies by latitude
+      const equatorialRadius = 6378137.0; // Earth radius at equator in meters
+      const polarRadius = 6356752.3; // Earth radius at poles in meters
+      
+      const latRad = lat * Math.PI / 180;
+      const cos = Math.cos(latRad);
+      const sin = Math.sin(latRad);
+      
+      // Calculate radius at given latitude
+      const numerator = Math.pow(equatorialRadius * equatorialRadius * cos, 2) + 
+                        Math.pow(polarRadius * polarRadius * sin, 2);
+      const denominator = Math.pow(equatorialRadius * cos, 2) + 
+                          Math.pow(polarRadius * sin, 2);
+      
+      return Math.sqrt(numerator / denominator);
+    };
+    
+    // Average Earth radius for the two points
+    const R = (getEarthRadius(lat1) + getEarthRadius(lat2)) / 2;
+    
     const φ1 = lat1 * Math.PI/180;
     const φ2 = lat2 * Math.PI/180;
     const Δφ = (lat2-lat1) * Math.PI/180;
@@ -401,13 +423,27 @@ export default function TrackingScreen({ navigation }) {
             mapType="standard"
           >
             {routeCoordinates.length > 0 && (
-              <Polyline
-                coordinates={routeCoordinates}
-                strokeWidth={4}
-                strokeColor="#FC4C02"
-                lineCap="round"
-                lineJoin="round"
-              />
+              <>
+                {/* Background glow effect */}
+                <Polyline
+                  coordinates={routeCoordinates}
+                  strokeWidth={8}
+                  strokeColor="rgba(46, 125, 50, 0.3)"  // Semi-transparent forest green
+                  lineCap="round"
+                  lineJoin="round"
+                  zIndex={1}
+                />
+                
+                {/* Main route line */}
+                <Polyline
+                  coordinates={routeCoordinates}
+                  strokeWidth={5}
+                  strokeColor="#2E7D32"  // Forest green (changed from #FC4C02 orange)
+                  lineCap="round"
+                  lineJoin="round"
+                  zIndex={2}
+                />
+              </>
             )}
             
             {/* Start marker with custom callout */}
@@ -419,6 +455,44 @@ export default function TrackingScreen({ navigation }) {
                 pinColor="green"
               />
             )}
+            
+            {/* Distance markers every kilometer */}
+            {routeCoordinates.length > 0 && stats.distance >= 1000 && 
+              Array.from({length: Math.floor(stats.distance / 1000)}).map((_, i) => {
+                // Find the coordinate closest to this kilometer mark
+                const targetDistance = (i + 1) * 1000; // 1km, 2km, etc.
+                let distanceSoFar = 0;
+                let markerCoord = routeCoordinates[0];
+                
+                for (let j = 1; j < routeCoordinates.length; j++) {
+                  const segmentDistance = calculateDistance(
+                    routeCoordinates[j-1].latitude,
+                    routeCoordinates[j-1].longitude,
+                    routeCoordinates[j].latitude,
+                    routeCoordinates[j].longitude
+                  );
+                  
+                  distanceSoFar += segmentDistance;
+                  
+                  if (distanceSoFar >= targetDistance) {
+                    markerCoord = routeCoordinates[j];
+                    break;
+                  }
+                }
+                
+                return (
+                  <Marker
+                    key={`km-${i+1}`}
+                    coordinate={markerCoord}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                  >
+                    <View style={styles.kmMarker}>
+                      <Text style={styles.kmMarkerText}>{i+1}</Text>
+                    </View>
+                  </Marker>
+                );
+              })
+            }
           </MapView>
         ) : (
           <View style={styles.loadingContainer}>
@@ -508,7 +582,7 @@ export default function TrackingScreen({ navigation }) {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Save Your Hike</Text>
-              <MaterialIcons name="hiking" size={28} color="#FC4C02" />
+              <MaterialIcons name="hiking" size={28} color="#2E7D32" />
             </View>
             
             <View style={styles.modalStatsContainer}>
@@ -567,17 +641,17 @@ export default function TrackingScreen({ navigation }) {
             <Text style={styles.pausedText}>PAUSED</Text>
             <View style={styles.pausedStatsContainer}>
               <View style={styles.pausedStatRow}>
-                <Ionicons name="speedometer-outline" size={20} color="#388E3C" />
+                <Ionicons name="speedometer-outline" size={20} color="#2E7D32" />
                 <Text style={styles.pausedStat}>{formatDistance(stats.distance)}</Text>
               </View>
               
               <View style={styles.pausedStatRow}>
-                <Ionicons name="time-outline" size={20} color="#388E3C" />
+                <Ionicons name="time-outline" size={20} color="#2E7D32" />
                 <Text style={styles.pausedStat}>{formatDuration(stats.duration)}</Text>
               </View>
               
               <View style={styles.pausedStatRow}>
-                <MaterialIcons name="speed" size={20} color="#388E3C" />
+                <MaterialIcons name="speed" size={20} color="#2E7D32" />
                 <Text style={styles.pausedStat}>{formatPace(stats.pace)}</Text>
               </View>
             </View>
@@ -607,7 +681,7 @@ export default function TrackingScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#212121', // Dark background for minimalist look
+    backgroundColor: '#FFFFFF', // Light background for modern look
   },
   mapContainer: {
     flex: 1,
@@ -620,10 +694,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#212121', // Dark background
+    backgroundColor: '#F5F8F5', // Light green tint
   },
   loadingText: {
-    color: '#FFFFFF',
+    color: '#2E7D32', // Forest green
     fontSize: 16,
     fontWeight: '500',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
@@ -632,29 +706,28 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Platform.OS === 'ios' ? 50 : 40,
     alignSelf: 'center',
-    backgroundColor: 'rgba(33, 33, 33, 0.85)', // Dark with transparency
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)', // Light with transparency
+    paddingVertical: 10,
+    paddingHorizontal: 18,
     borderRadius: 20,
-    borderWidth: 0, // Remove border for minimal look
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   mapOverlayText: {
-    color: 'white',
+    color: '#2E7D32', // Forest green
     fontWeight: '600',
     fontSize: 16,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
   statsContainer: {
-    backgroundColor: '#212121', // Dark background
+    backgroundColor: '#FFFFFF', // White background
     paddingVertical: 16,
     paddingHorizontal: 20,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)', // Very subtle border
+    borderTopColor: '#E0E5E0', // Light green border
   },
   buttonContainer: {
     flexDirection: 'row',
@@ -662,25 +735,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     paddingHorizontal: 20,
-    backgroundColor: '#181818', // Even darker background for contrast
-    borderTopWidth: 0, // Remove border for cleaner look
+    backgroundColor: '#F5F8F5', // Light green background
+    borderTopWidth: 1,
+    borderTopColor: '#E0E5E0',
   },
   backButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)', // Very subtle background
+    backgroundColor: 'rgba(46, 125, 50, 0.1)', // Semi-transparent green
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
   },
   trackButton: {
     flexDirection: 'row',
-    backgroundColor: '#388E3C', // Green for primary action
+    backgroundColor: '#2E7D32', // Forest green
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 30,
@@ -698,15 +767,15 @@ const styles = StyleSheet.create({
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 25,
     marginLeft: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   actionButtonText: {
     color: 'white',
@@ -719,10 +788,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFA000', // Amber for pause
   },
   resumeButton: {
-    backgroundColor: '#388E3C', // Green for resume
+    backgroundColor: '#2E7D32', // Forest green
   },
   stopButton: {
-    backgroundColor: '#F44336', // Red for stop
+    backgroundColor: '#D32F2F', // Red for stop
   },
   trackButtonText: {
     color: 'white',
@@ -731,11 +800,13 @@ const styles = StyleSheet.create({
     marginRight: 8,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
+  
+  // Updated modal styles for a more professional look
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Lighter overlay
   },
   modalContent: {
     width: '85%',
@@ -744,25 +815,25 @@ const styles = StyleSheet.create({
     padding: 0,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#F5F8F5', // Light green background
     paddingVertical: 18,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: '#E0E5E0',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#212121', // Dark text
+    color: '#2E7D32', // Forest green text
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
   modalStatsContainer: {
@@ -786,14 +857,14 @@ const styles = StyleSheet.create({
   modalStatValue: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#212121', // Dark text
+    color: '#2E7D32', // Forest green
     marginTop: 6,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
   modalButtonsContainer: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: '#eeeeee',
+    borderTopColor: '#E0E5E0',
   },
   modalButton: {
     flex: 1,
@@ -801,14 +872,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   discardButton: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#F5F8F5',
     borderRightWidth: 0.5,
-    borderRightColor: '#eeeeee',
+    borderRightColor: '#E0E5E0',
   },
   saveButton: {
-    backgroundColor: '#388E3C', // Green for save
+    backgroundColor: '#2E7D32', // Forest green
     borderLeftWidth: 0.5,
-    borderLeftColor: '#eeeeee',
+    borderLeftColor: '#E0E5E0',
   },
   discardButtonText: {
     color: '#616161', // Medium gray
@@ -822,13 +893,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
+  
+  // Paused overlay with forest green theme
   pausedOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)', // Lighter overlay
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
@@ -836,18 +909,19 @@ const styles = StyleSheet.create({
   pausedContent: {
     width: '85%',
     alignItems: 'center',
-    backgroundColor: 'rgba(33, 33, 33, 0.95)', // Dark with slight transparency
+    backgroundColor: 'white',
     borderRadius: 20,
     padding: 28,
-    borderWidth: 0, // Remove border for minimal look
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 5,
   },
   pausedText: {
-    color: 'white',
+    color: '#2E7D32', // Forest green
     fontSize: 28,
     fontWeight: '700',
     marginBottom: 28,
@@ -855,11 +929,13 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
   pausedStatsContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)', // Very subtle background
+    backgroundColor: '#F5F8F5', // Light green background
     borderRadius: 16, 
     padding: 20,
     marginBottom: 30,
     width: '100%',
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
   },
   pausedStatRow: {
     flexDirection: 'row',
@@ -867,7 +943,7 @@ const styles = StyleSheet.create({
     marginVertical: 8,
   },
   pausedStat: {
-    color: 'white',
+    color: '#333333',
     fontSize: 18,
     fontWeight: '500',
     marginLeft: 14,
@@ -875,7 +951,7 @@ const styles = StyleSheet.create({
   },
   resumeOverlayButton: {
     flexDirection: 'row',
-    backgroundColor: '#388E3C', // Green for resume
+    backgroundColor: '#2E7D32', // Forest green
     paddingHorizontal: 28,
     paddingVertical: 16,
     borderRadius: 30,
@@ -898,7 +974,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Platform.OS === 'ios' ? 40 : 30,
     right: 15,
-    backgroundColor: 'rgba(255, 152, 0, 0.9)', // Orange with transparency
+    backgroundColor: 'rgba(46, 125, 50, 0.9)', // Forest green with transparency
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 15,
@@ -908,5 +984,25 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '600',
     fontSize: 12,
+  },
+  kmMarker: {
+    backgroundColor: 'white',
+    borderWidth: 2,
+    borderColor: '#2E7D32',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  kmMarkerText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#2E7D32',
   },
 })
