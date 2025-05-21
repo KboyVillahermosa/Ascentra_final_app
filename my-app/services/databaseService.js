@@ -166,3 +166,60 @@ export const getHikesForUser = async (userId) => {
     return [];
   }
 };
+
+// Get a specific hike by its ID
+export const getHikeById = async (hikeId) => {
+  try {
+    // Get user-specific key
+    const userId = await getCurrentUserId();
+    const storageKey = `@ascentra_hikes_${userId}`;
+    
+    // Get all hikes from storage
+    const hikesStr = await AsyncStorage.getItem(storageKey);
+    if (!hikesStr) {
+      console.log(`No hikes found for user ${userId}`);
+      return null;
+    }
+    
+    // Parse hikes and find the one with matching ID
+    const hikes = JSON.parse(hikesStr);
+    const hike = hikes.find(h => h.id.toString() === hikeId.toString());
+    
+    if (!hike) {
+      console.log(`Hike with ID ${hikeId} not found`);
+      return null;
+    }
+    
+    // Make sure route coordinates are valid
+    if (hike.routeCoordinates && Array.isArray(hike.routeCoordinates)) {
+      // Filter out any invalid coordinates
+      hike.routeCoordinates = hike.routeCoordinates.filter(coord => {
+        return coord && 
+               typeof coord.latitude === 'number' && 
+               typeof coord.longitude === 'number' &&
+               !isNaN(coord.latitude) && 
+               !isNaN(coord.longitude) &&
+               Math.abs(coord.latitude) <= 90 &&
+               Math.abs(coord.longitude) <= 180;
+      });
+      
+      console.log(`Sanitized route coordinates: ${hike.routeCoordinates.length} valid points`);
+    }
+
+    // If we have coordinates, make sure to stringify and reparse to fix any odd data issues
+    if (hike.routeCoordinates && hike.routeCoordinates.length > 0) {
+      try {
+        const temp = JSON.parse(JSON.stringify(hike.routeCoordinates));
+        hike.routeCoordinates = temp;
+      } catch (e) {
+        console.error('Failed to sanitize coordinates:', e);
+      }
+    }
+    
+    console.log(`Retrieved hike: ${hike.title} with ${hike.routeCoordinates?.length || 0} route points`);
+    return hike;
+  } catch (error) {
+    console.error('Error getting hike by ID:', error);
+    throw error;
+  }
+};

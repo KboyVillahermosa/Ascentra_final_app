@@ -23,6 +23,7 @@ import EditProfileScreen from './screens/EditProfileScreen';
 import ChangePasswordScreen from './screens/ChangePasswordScreen';
 import MediaViewerScreen from './screens/MediaViewerScreen';
 import SaveActivityScreen from './screens/SaveActivityScreen';
+import HikeDetailScreen from './screens/HikeDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -207,6 +208,11 @@ export default function App() {
               name="MediaViewer" 
               component={MediaViewerScreen} 
               options={{ headerShown: false }} 
+            />
+            <Stack.Screen 
+              name="HikeDetail" 
+              component={HikeDetailScreen} 
+              options={{ headerShown: false }}
             />
           </>
         ) : (

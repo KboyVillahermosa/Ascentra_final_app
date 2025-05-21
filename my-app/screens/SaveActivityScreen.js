@@ -12,7 +12,8 @@ import {
   KeyboardAvoidingView,
   Image,
   FlatList,
-  Alert
+  Alert,
+  Modal
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -30,6 +31,30 @@ export default function SaveActivityScreen({ navigation, route }) {
   const [privateNotes, setPrivateNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [mediaFiles, setMediaFiles] = useState([]);
+  
+  // Modal visibility state
+  const [activityTypeModalVisible, setActivityTypeModalVisible] = useState(false);
+  const [feelingModalVisible, setFeelingModalVisible] = useState(false);
+  
+  // Activity type options
+  const activityTypes = [
+    { icon: 'footsteps', name: 'Hiking' },
+    { icon: 'walk', name: 'Trail Running' },
+    { icon: 'bicycle', name: 'Mountain Biking' },
+    { icon: 'pin', name: 'Backpacking' },
+    { icon: 'trending-up', name: 'Rock Climbing' },
+    { icon: 'snow', name: 'Snowshoeing' },
+    { icon: 'compass', name: 'Exploring' }
+  ];
+  
+  // Feeling options
+  const feelingOptions = [
+    { icon: 'happy', name: 'Great' },
+    { icon: 'smile', name: 'Good' },
+    { icon: 'thumbs-up', name: 'Okay' },
+    { icon: 'sad', name: 'Tired' },
+    { icon: 'thumbs-down', name: 'Exhausted' }
+  ];
 
   // Request permissions and pick images
   const pickMedia = async () => {
@@ -155,9 +180,65 @@ export default function SaveActivityScreen({ navigation, route }) {
     );
   };
 
+  // Render activity type option
+  const renderActivityTypeOption = (item) => {
+    return (
+      <TouchableOpacity 
+        style={[
+          styles.optionItem,
+          activityType === item.name && styles.selectedOptionItem
+        ]}
+        onPress={() => {
+          setActivityType(item.name);
+          setActivityTypeModalVisible(false);
+        }}
+      >
+        <Ionicons 
+          name={item.icon} 
+          size={24} 
+          color={activityType === item.name ? 'white' : '#2E7D32'} 
+        />
+        <Text style={[
+          styles.optionText,
+          activityType === item.name && styles.selectedOptionText
+        ]}>
+          {item.name}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  // Render feeling option
+  const renderFeelingOption = (item) => {
+    return (
+      <TouchableOpacity 
+        style={[
+          styles.optionItem,
+          feeling === item.name && styles.selectedOptionItem
+        ]}
+        onPress={() => {
+          setFeeling(item.name);
+          setFeelingModalVisible(false);
+        }}
+      >
+        <Ionicons 
+          name={item.icon} 
+          size={24} 
+          color={feeling === item.name ? 'white' : '#2E7D32'} 
+        />
+        <Text style={[
+          styles.optionText,
+          feeling === item.name && styles.selectedOptionText
+        ]}>
+          {item.name}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#212121" />
+      <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
       
       <View style={styles.header}>
         <TouchableOpacity
@@ -188,7 +269,7 @@ export default function SaveActivityScreen({ navigation, route }) {
           <TextInput
             style={styles.titleInput}
             placeholder="Title your activity"
-            placeholderTextColor="#999"
+            placeholderTextColor="#8BA989"
             value={title}
             onChangeText={setTitle}
           />
@@ -197,7 +278,7 @@ export default function SaveActivityScreen({ navigation, route }) {
           <TextInput
             style={styles.descriptionInput}
             placeholder="How'd it go? Share more about your activity and use @ to tag someone."
-            placeholderTextColor="#999"
+            placeholderTextColor="#8BA989"
             multiline={true}
             numberOfLines={3}
             textAlignVertical="top"
@@ -206,10 +287,13 @@ export default function SaveActivityScreen({ navigation, route }) {
           />
           
           {/* Activity Type Selector */}
-          <TouchableOpacity style={styles.selectorButton}>
-            <Ionicons name="footsteps" size={22} color="#FC4C02" />
+          <TouchableOpacity 
+            style={styles.selectorButton}
+            onPress={() => setActivityTypeModalVisible(true)}
+          >
+            <Ionicons name="footsteps" size={22} color="#2E7D32" />
             <Text style={styles.selectorText}>{activityType}</Text>
-            <Ionicons name="chevron-down" size={22} color="#AAA" />
+            <Ionicons name="chevron-down" size={22} color="#8BA989" />
           </TouchableOpacity>
           
           {/* Media Gallery */}
@@ -231,7 +315,7 @@ export default function SaveActivityScreen({ navigation, route }) {
             style={styles.mediaButton}
             onPress={pickMedia}
           >
-            <Ionicons name="image" size={22} color="#FC4C02" />
+            <Ionicons name="image" size={22} color="#2E7D32" />
             <Text style={styles.mediaButtonText}>Add Photos/Videos</Text>
           </TouchableOpacity>
           
@@ -246,26 +330,34 @@ export default function SaveActivityScreen({ navigation, route }) {
           </View>
           
           {/* Activity Type Detail */}
-          <TouchableOpacity style={styles.detailButton}>
-            <Ionicons name="pulse" size={22} color="#AAA" />
+          <TouchableOpacity 
+            style={styles.detailButton}
+            onPress={() => setActivityTypeModalVisible(true)}
+          >
+            <Ionicons name="pulse" size={22} color="#8BA989" />
             <Text style={styles.detailButtonText}>Type of activity</Text>
-            <Ionicons name="chevron-down" size={22} color="#AAA" />
+            <Text style={styles.detailValueText}>{activityType}</Text>
+            <Ionicons name="chevron-down" size={22} color="#8BA989" />
           </TouchableOpacity>
           
           {/* Feeling */}
-          <TouchableOpacity style={styles.detailButton}>
-            <Ionicons name="happy-outline" size={22} color="#AAA" />
+          <TouchableOpacity 
+            style={styles.detailButton}
+            onPress={() => setFeelingModalVisible(true)}
+          >
+            <Ionicons name="happy-outline" size={22} color="#8BA989" />
             <Text style={styles.detailButtonText}>How did that activity feel?</Text>
-            <Ionicons name="chevron-down" size={22} color="#AAA" />
+            <Text style={styles.detailValueText}>{feeling || 'Select'}</Text>
+            <Ionicons name="chevron-down" size={22} color="#8BA989" />
           </TouchableOpacity>
           
           {/* Private Notes */}
           <View style={styles.notesContainer}>
-            <Ionicons name="lock-closed" size={22} color="#AAA" />
+            <Ionicons name="lock-closed" size={22} color="#8BA989" />
             <TextInput
               style={styles.notesInput}
               placeholder="Jot down private notes here. Only you can see these."
-              placeholderTextColor="#999"
+              placeholderTextColor="#8BA989"
               multiline={true}
               numberOfLines={3}
               textAlignVertical="top"
@@ -295,6 +387,66 @@ export default function SaveActivityScreen({ navigation, route }) {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      
+      {/* Activity Type Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={activityTypeModalVisible}
+        onRequestClose={() => setActivityTypeModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Activity Type</Text>
+              <TouchableOpacity
+                onPress={() => setActivityTypeModalVisible(false)}
+              >
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView>
+              {activityTypes.map((item, index) => (
+                <React.Fragment key={index}>
+                  {renderActivityTypeOption(item)}
+                  {index < activityTypes.length - 1 && <View style={styles.optionDivider} />}
+                </React.Fragment>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Feeling Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={feelingModalVisible}
+        onRequestClose={() => setFeelingModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>How did it feel?</Text>
+              <TouchableOpacity
+                onPress={() => setFeelingModalVisible(false)}
+              >
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView>
+              {feelingOptions.map((item, index) => (
+                <React.Fragment key={index}>
+                  {renderFeelingOption(item)}
+                  {index < feelingOptions.length - 1 && <View style={styles.optionDivider} />}
+                </React.Fragment>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -302,7 +454,7 @@ export default function SaveActivityScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#212121',
+    backgroundColor: '#F5F8F5',
   },
   header: {
     flexDirection: 'row',
@@ -310,9 +462,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 16,
-    backgroundColor: '#212121',
+    backgroundColor: '#2E7D32',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: '#266A2A',
   },
   backButton: {
     padding: 8,
@@ -328,7 +480,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   saveButtonText: {
-    color: '#FC4C02',
+    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 16,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
@@ -340,34 +492,40 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   titleInput: {
-    backgroundColor: '#333',
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
-    color: 'white',
+    color: '#333',
     padding: 16,
     fontSize: 16,
     marginBottom: 16,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
   },
   descriptionInput: {
-    backgroundColor: '#333',
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
-    color: 'white',
+    color: '#333',
     padding: 16,
     fontSize: 16,
     height: 100,
     marginBottom: 16,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
   },
   selectorButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#333',
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
   },
   selectorText: {
-    color: 'white',
+    color: '#333',
     fontSize: 16,
     flex: 1,
     marginLeft: 12,
@@ -389,7 +547,7 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
     borderRadius: 8,
-    backgroundColor: '#444',
+    backgroundColor: '#E0E5E0',
   },
   videoIndicator: {
     position: 'absolute',
@@ -406,7 +564,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -8,
     right: -8,
-    backgroundColor: '#FC4C02',
+    backgroundColor: '#2E7D32',
     borderRadius: 12,
     width: 24,
     height: 24,
@@ -416,7 +574,7 @@ const styles = StyleSheet.create({
   mediaButton: {
     backgroundColor: 'transparent',
     borderWidth: 2,
-    borderColor: '#FC4C02',
+    borderColor: '#2E7D32',
     borderStyle: 'dashed',
     borderRadius: 8,
     flexDirection: 'row',
@@ -426,21 +584,23 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   mediaButtonText: {
-    color: '#FC4C02',
+    color: '#2E7D32',
     fontSize: 16,
     marginLeft: 8,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   mapButton: {
-    backgroundColor: '#333',
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
   },
   mapButtonText: {
-    color: '#FC4C02',
+    color: '#2E7D32',
     fontSize: 16,
     fontWeight: '500',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
@@ -449,7 +609,7 @@ const styles = StyleSheet.create({
     marginVertical: 16,
   },
   sectionHeaderText: {
-    color: 'white',
+    color: '#333',
     fontSize: 22,
     fontWeight: 'bold',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
@@ -457,28 +617,39 @@ const styles = StyleSheet.create({
   detailButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#333',
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
   },
   detailButtonText: {
-    color: 'white',
+    color: '#333',
     fontSize: 16,
     flex: 1,
     marginLeft: 12,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
+  detailValueText: {
+    color: '#2E7D32',
+    fontSize: 16,
+    marginRight: 8,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
   notesContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#333',
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
     padding: 16,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
   },
   notesInput: {
-    color: 'white',
+    color: '#333',
     fontSize: 16,
     flex: 1,
     marginLeft: 12,
@@ -487,24 +658,78 @@ const styles = StyleSheet.create({
   statsSummary: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    backgroundColor: '#333',
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
     padding: 16,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E0E5E0',
   },
   statItem: {
     alignItems: 'center',
   },
   statLabel: {
-    color: '#AAA',
+    color: '#8BA989',
     fontSize: 14,
     marginBottom: 4,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   statValue: {
-    color: 'white',
+    color: '#333',
     fontSize: 18,
     fontWeight: '600',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E5E0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  optionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 8,
+  },
+  selectedOptionItem: {
+    backgroundColor: '#2E7D32',
+  },
+  optionText: {
+    fontSize: 16,
+    color: '#333',
+    marginLeft: 16,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  selectedOptionText: {
+    color: 'white',
+    fontWeight: '500',
+  },
+  optionDivider: {
+    height: 1,
+    backgroundColor: '#E0E5E0',
+    marginVertical: 4,
   },
 });

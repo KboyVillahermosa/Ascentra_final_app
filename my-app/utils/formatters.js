@@ -1,42 +1,66 @@
-// Format distance in meters to km or m
-export const formatDistance = (meters) => {
-  if (meters < 1000) {
-    return `${Math.round(meters)}m`;
+// Format distance to show as km with one decimal, or in meters if small
+export const formatDistance = (meters, strava = false) => {
+  if (!meters) return '0 m';
+  
+  if (strava) {
+    // Strava-style formatting
+    if (meters < 1000) {
+      return `${meters.toFixed(0)} m`;
+    } else {
+      const km = meters / 1000;
+      return `${km.toFixed(2)} km`;
+    }
+  } else {
+    // Original formatting
+    if (meters < 1000) {
+      return `${meters.toFixed(0)} m`;
+    } else {
+      const km = meters / 1000;
+      return `${km.toFixed(2)} km`;
+    }
   }
-  return `${(meters / 1000).toFixed(2)}km`;
 };
 
-// Format duration in seconds to hh:mm:ss
-export const formatDuration = (seconds) => {
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
+// Format duration as MM:SS or HH:MM:SS depending on length
+export const formatDuration = (seconds, strava = false) => {
+  if (!seconds) return '0:00';
   
-  let result = '';
-  
-  if (hrs > 0) {
-    result += `${hrs}h `;
+  if (strava) {
+    // Strava-style simple format: 1m 34s or 1h 2m
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    if (hrs > 0) {
+      return `${hrs}h ${mins}m`;
+    } else {
+      return `${mins}m ${secs}s`;
+    }
+  } else {
+    // Original formatting
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
   }
-  
-  if (mins > 0 || hrs > 0) {
-    result += `${mins}m `;
-  }
-  
-  result += `${secs}s`;
-  
-  return result.trim();
 };
 
-// Format pace (min per km)
-export const formatPace = (pace) => {
-  if (!pace || isNaN(pace) || pace === 0) {
-    return '--:--';
-  }
+// Format pace as MM:SS/km
+export const formatPace = (metersPerSecond) => {
+  if (!metersPerSecond || metersPerSecond === 0) return '-:--/km';
   
-  const mins = Math.floor(pace);
-  const secs = Math.floor((pace - mins) * 60);
+  // Convert m/s to s/km
+  const secondsPerKm = (1000 / metersPerSecond);
   
-  return `${mins}:${secs < 10 ? '0' : ''}${secs}/km`;
+  const mins = Math.floor(secondsPerKm / 60);
+  const secs = Math.floor(secondsPerKm % 60);
+  
+  return `${mins}:${secs.toString().padStart(2, '0')}/km`;
 };
 
 // Format date
