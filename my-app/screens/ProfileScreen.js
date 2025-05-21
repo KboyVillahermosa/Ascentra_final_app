@@ -14,6 +14,8 @@ import {
 import { supabase } from '../utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getHikesForUser } from '../services/databaseService';
+import { formatDate, formatDistance, formatDuration, formatPace } from '../utils/formatters';
 
 export default function ProfileScreen({ route, navigation }) {
   const { userId } = route.params || {};
@@ -28,6 +30,10 @@ export default function ProfileScreen({ route, navigation }) {
     hikesCount: 0,
     totalDistance: 0
   });
+  
+  // Add state for hikes
+  const [hikes, setHikes] = useState([]);
+  const [hikesLoading, setHikesLoading] = useState(true);
 
   // Determine if we're viewing the current user's profile or someone else's
   const isOwnProfile = !userId || (currentUser && userId === currentUser.id);
@@ -44,11 +50,13 @@ export default function ProfileScreen({ route, navigation }) {
         fetchProfile(currentUser.id);
         fetchUserPosts(currentUser.id);
         fetchUserStats(currentUser.id);
+        fetchUserHikes(currentUser.id);
       } else {
         // Otherwise, we're viewing someone else's profile
         fetchProfile(userId);
         fetchUserPosts(userId);
         fetchUserStats(userId);
+        fetchUserHikes(userId);
       }
     }
   }, [currentUser, userId]);
@@ -56,6 +64,48 @@ export default function ProfileScreen({ route, navigation }) {
   async function getCurrentUser() {
     const { data: { user } } = await supabase.auth.getUser();
     setCurrentUser(user);
+  }
+
+  // Add function to fetch user hikes
+  async function fetchUserHikes(id) {
+    try {
+      setHikesLoading(true);
+      console.log('Fetching hikes for user ID:', id);
+      
+      // Get hikes for this user
+      const userHikes = await getHikesForUser(id);
+      console.log(`Received ${userHikes ? userHikes.length : 0} hikes for user ${id}`);
+      
+      if (!userHikes || userHikes.length === 0) {
+        console.log('No hikes found for this user');
+        setHikes([]);
+        return;
+      }
+      
+      // Log details of first hike for debugging
+      if (userHikes.length > 0) {
+        console.log('First hike details:', {
+          title: userHikes[0].title,
+          date: userHikes[0].date,
+          hasMedia: userHikes[0].media && userHikes[0].media.length > 0
+        });
+      }
+      
+      // Sort by date (newest first)
+      const sortedHikes = userHikes.sort((a, b) => {
+        return new Date(b.date) - new Date(a.date);
+      });
+      
+      // Limit to most recent 5 for profile view
+      const recentHikes = sortedHikes.slice(0, 5);
+      
+      setHikes(recentHikes);
+    } catch (error) {
+      console.error('Error fetching user hikes:', error);
+      setHikes([]);
+    } finally {
+      setHikesLoading(false);
+    }
   }
 
   async function fetchProfile(id) {
@@ -122,29 +172,33 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }
 
+  // Update fetchUserStats to use local data
   async function fetchUserStats(id) {
     try {
-      // Get post count
+      // Get post count from Supabase
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
         .select('id', { count: 'exact' })
         .eq('user_id', id);
 
-      // Get hikes count and total distance
-      const { data: hikesData, error: hikesError } = await supabase
-        .from('activities')
-        .select('id, distance')
-        .eq('user_id', id);
-
-      if (!postsError && !hikesError) {
-        const totalDistance = hikesData.reduce((sum, hike) => sum + (hike.distance || 0), 0);
-        
-        setStats({
-          postsCount: postsData.length,
-          hikesCount: hikesData.length,
-          totalDistance: totalDistance
-        });
-      }
+      // Get hikes count and total distance from local storage
+      const userHikes = await getHikesForUser(id);
+      
+      // Calculate total distance from local hikes
+      const totalDistance = userHikes.reduce((sum, hike) => 
+        sum + (hike.distance || 0), 0);
+      
+      setStats({
+        postsCount: postsData?.length || 0,
+        hikesCount: userHikes?.length || 0,
+        totalDistance: totalDistance / 1000 // Convert to km
+      });
+      
+      console.log('Updated user stats:', {
+        posts: postsData?.length || 0,
+        hikes: userHikes?.length || 0,
+        distance: totalDistance / 1000
+      });
     } catch (error) {
       console.error('Error fetching user stats:', error);
     }
@@ -156,7 +210,8 @@ export default function ProfileScreen({ route, navigation }) {
     Promise.all([
       fetchProfile(profileId),
       fetchUserPosts(profileId),
-      fetchUserStats(profileId)
+      fetchUserStats(profileId),
+      fetchUserHikes(profileId)
     ]).finally(() => {
       setRefreshing(false);
     });
@@ -268,6 +323,61 @@ export default function ProfileScreen({ route, navigation }) {
     );
   }
 
+  // Function to render a hike activity item
+  function renderHikeItem({ item }) {
+    // Check if the hike has media files
+    const hasMedia = item.media && Array.isArray(item.media) && item.media.length > 0;
+    const mainImage = hasMedia ? { uri: item.media[0].uri } : null;
+    
+    return (
+      <TouchableOpacity 
+        style={styles.hikeCard}
+        onPress={() => {
+          // Navigate to activity details screen or show details modal
+          Alert.alert(
+            item.title || 'Hiking Activity',
+            `${item.description ? item.description + '\n\n' : ''}` +
+            `Date: ${formatDate(item.date)}\n` +
+            `Distance: ${formatDistance(item.distance)}\n` +
+            `Duration: ${formatDuration(item.duration)}\n` +
+            `Elevation gain: ${item.elevation?.toFixed(0)}m`
+          );
+        }}
+      >
+        <View style={styles.hikeCardContent}>
+          <View style={styles.hikeInfo}>
+            <Text style={styles.hikeTitle}>{item.title || 'Hiking Activity'}</Text>
+            <Text style={styles.hikeDate}>{formatDate(item.date)}</Text>
+            
+            <View style={styles.hikeStats}>
+              <View style={styles.hikeStat}>
+                <Ionicons name="navigate" size={16} color="#FC4C02" />
+                <Text style={styles.hikeStatText}>{formatDistance(item.distance)}</Text>
+              </View>
+              
+              <View style={styles.hikeStat}>
+                <Ionicons name="time" size={16} color="#FC4C02" />
+                <Text style={styles.hikeStatText}>{formatDuration(item.duration)}</Text>
+              </View>
+              
+              <View style={styles.hikeStat}>
+                <Ionicons name="trending-up" size={16} color="#FC4C02" />
+                <Text style={styles.hikeStatText}>{item.elevation?.toFixed(0)}m</Text>
+              </View>
+            </View>
+          </View>
+          
+          {mainImage && (
+            <Image 
+              source={mainImage} 
+              style={styles.hikeImage} 
+            />
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
@@ -313,7 +423,7 @@ export default function ProfileScreen({ route, navigation }) {
           {isOwnProfile && (
             <TouchableOpacity 
               style={styles.editProfileButton}
-              onPress={editProfile}
+              onPress={() => navigation.navigate('EditProfile')}
             >
               <Text style={styles.editProfileText}>Edit Profile</Text>
             </TouchableOpacity>
@@ -339,6 +449,46 @@ export default function ProfileScreen({ route, navigation }) {
           </View>
         </View>
         
+        {/* Add Hiking Activities Section */}
+        <View style={styles.activitiesSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent Activities</Text>
+            <TouchableOpacity 
+              style={styles.viewAllButton}
+              onPress={() => {
+                // Navigate to a screen showing all activities
+                navigation.navigate('HikeHistory');
+              }}
+            >
+              <Text style={styles.viewAllText}>View all</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {hikesLoading ? (
+            <ActivityIndicator style={styles.hikesLoader} color="#2E7D32" />
+          ) : hikes.length > 0 ? (
+            hikes.map((hike, index) => (
+              <View key={hike.id || index}>
+                {renderHikeItem({ item: hike })}
+              </View>
+            ))
+          ) : (
+            <View style={styles.emptyHikesContainer}>
+              <Ionicons name="footsteps-outline" size={50} color="#ccc" />
+              <Text style={styles.emptyHikesText}>No hiking activities yet</Text>
+              {isOwnProfile && (
+                <TouchableOpacity 
+                  style={styles.startTrackingButton}
+                  onPress={() => navigation.navigate('Tracking')}
+                >
+                  <Text style={styles.startTrackingText}>Start tracking</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
+        
+        {/* Keep existing posts section */}
         <View style={styles.postsSection}>
           <Text style={styles.sectionTitle}>Posts</Text>
           
@@ -366,6 +516,7 @@ export default function ProfileScreen({ route, navigation }) {
   );
 }
 
+// Add new styles for hiking activities
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -572,5 +723,105 @@ const styles = StyleSheet.create({
   },
   postsLoader: {
     padding: 30,
-  }
+  },
+  // Add new styles for hikes
+  activitiesSection: {
+    marginTop: 15,
+    backgroundColor: '#FFF',
+    paddingBottom: 15,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingVertical: 15,
+  },
+  viewAllButton: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+  },
+  viewAllText: {
+    color: '#2E7D32',
+    fontWeight: '500',
+  },
+  hikeCard: {
+    backgroundColor: '#FFF',
+    marginHorizontal: 10,
+    marginBottom: 15,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+  },
+  hikeCardContent: {
+    flexDirection: 'row',
+    padding: 15,
+  },
+  hikeInfo: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  hikeTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 5,
+  },
+  hikeDate: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 12,
+  },
+  hikeStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  hikeStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  hikeStatText: {
+    fontSize: 14,
+    color: '#555',
+    marginLeft: 4,
+  },
+  hikeImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginLeft: 15,
+  },
+  hikesLoader: {
+    padding: 30,
+  },
+  emptyHikesContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+    margin: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: '#FAFAFA',
+  },
+  emptyHikesText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#888',
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  startTrackingButton: {
+    backgroundColor: '#FC4C02',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginTop: 10,
+  },
+  startTrackingText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+  },
 });

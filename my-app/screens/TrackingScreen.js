@@ -328,7 +328,7 @@ export default function TrackingScreen({ navigation }) {
       
       // Navigate to the SaveActivityScreen with current hike data
       navigation.navigate('SaveActivity', {
-        routeCoordinates,
+        routeCoordinates, // Make sure this is being passed!
         stats: {
           distance: stats.distance || 0,
           duration: stats.duration || 0,

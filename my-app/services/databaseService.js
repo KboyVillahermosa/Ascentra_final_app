@@ -58,8 +58,9 @@ export const saveHikeToLocalDB = async (hikeData) => {
       duration: hikeData.stats.duration,
       pace: hikeData.stats.pace,
       elevation: hikeData.stats.elevation,
-      routeCoordinates: hikeData.routeCoordinates,
-      // Explicitly include media with proper object structure
+      // Make sure route coordinates are saved
+      routeCoordinates: hikeData.routeCoordinates || [],
+      // Media
       media: Array.isArray(hikeData.media) ? hikeData.media.map(item => ({
         uri: item.uri,
         type: item.type || (item.uri && item.uri.endsWith('.mp4') ? 'video' : 'image'),
@@ -69,7 +70,8 @@ export const saveHikeToLocalDB = async (hikeData) => {
     };
     
     // Get user-specific key
-    const storageKey = await getUserHikesKey();
+    const userId = await getCurrentUserId();
+    const storageKey = `@ascentra_hikes_${userId}`;
     
     // Get existing hikes from AsyncStorage
     const hikesStr = await AsyncStorage.getItem(storageKey);
@@ -81,10 +83,10 @@ export const saveHikeToLocalDB = async (hikeData) => {
     // Add new hike
     hikes.push(hikeToSave);
     
-    // Save back to AsyncStorage with user-specific key
+    // Save back to AsyncStorage
     await AsyncStorage.setItem(storageKey, JSON.stringify(hikes));
     
-    console.log(`Hike saved locally with ID: ${hikeId} for user`);
+    console.log(`Hike saved locally with ID: ${hikeId}, includes ${hikeToSave.routeCoordinates.length} route points and ${hikeToSave.media.length} media items`);
     return hikeId;
   } catch (error) {
     console.error('Error saving hike to local DB:', error);
@@ -136,5 +138,31 @@ export const deleteHike = async (hikeId) => {
   } catch (error) {
     console.error('Error deleting hike:', error);
     throw error;
+  }
+};
+
+// Get hikes for a specific user (for profile viewing)
+export const getHikesForUser = async (userId) => {
+  try {
+    // Fall back to current user if no ID provided
+    const targetUserId = userId || await getCurrentUserId();
+    const storageKey = `@ascentra_hikes_${targetUserId}`;
+    
+    console.log('Fetching hikes for user with key:', storageKey);
+    
+    // Get hikes with user-specific key
+    const hikesStr = await AsyncStorage.getItem(storageKey);
+    
+    if (!hikesStr) {
+      console.log('No hikes found for this user');
+      return [];
+    }
+    
+    const hikes = JSON.parse(hikesStr);
+    console.log(`Found ${hikes.length} hikes for user ${targetUserId}`);
+    return hikes;
+  } catch (error) {
+    console.error('Error getting hikes for user:', error);
+    return [];
   }
 };

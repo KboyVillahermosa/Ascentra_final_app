@@ -11,17 +11,52 @@ import {
   Alert, 
   Modal, 
   ActivityIndicator,
-  Image
+  Image,
+  Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatDate, formatDistance, formatDuration, formatPace } from '../utils/formatters';
 import { getAllHikes, debugStorage, deleteHike } from '../services/databaseService';
+import MapView, { Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
-// Custom HikeHistoryItem component since we're not importing the original
+const { width } = Dimensions.get('window');
+const CARD_WIDTH = width - 64; // Account for margins and padding
+
+// Custom HikeHistoryItem component with map
 const HikeHistoryItem = ({ hike, onPress, onMediaPress }) => {
   // Check if the hike has media files
   const hasMedia = hike.media && Array.isArray(hike.media) && hike.media.length > 0;
+  const hasRoute = hike.routeCoordinates && Array.isArray(hike.routeCoordinates) && hike.routeCoordinates.length > 1;
+  
+  // Calculate map region based on route coordinates
+  const getMapRegion = () => {
+    if (!hasRoute) return null;
+    
+    // Find min/max coordinates to set boundaries
+    let minLat = hike.routeCoordinates[0].latitude;
+    let maxLat = hike.routeCoordinates[0].latitude;
+    let minLng = hike.routeCoordinates[0].longitude;
+    let maxLng = hike.routeCoordinates[0].longitude;
+    
+    hike.routeCoordinates.forEach(coord => {
+      minLat = Math.min(minLat, coord.latitude);
+      maxLat = Math.max(maxLat, coord.latitude);
+      minLng = Math.min(minLng, coord.longitude);
+      maxLng = Math.max(maxLng, coord.longitude);
+    });
+    
+    // Add padding
+    const latPadding = (maxLat - minLat) * 0.2;
+    const lngPadding = (maxLng - minLng) * 0.2;
+    
+    return {
+      latitude: (minLat + maxLat) / 2,
+      longitude: (minLng + maxLng) / 2,
+      latitudeDelta: (maxLat - minLat) + latPadding,
+      longitudeDelta: (maxLng - minLng) + lngPadding
+    };
+  };
   
   // Function to render media thumbnails
   const renderMedia = () => {
@@ -81,7 +116,6 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress }) => {
         <Text style={styles.hikeTitle}>
           {hike.title || 'Hiking Activity'}
         </Text>
-        {/* Not Synced badge removed */}
       </View>
       
       <Text style={styles.hikeDate}>{formatDate(hike.date)}</Text>
@@ -89,6 +123,33 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress }) => {
       {hike.description ? (
         <Text style={styles.hikeDescription} numberOfLines={2}>{hike.description}</Text>
       ) : null}
+      
+      {/* Route Map Preview */}
+      {hasRoute && (
+        <View style={styles.mapPreviewContainer}>
+          <MapView
+            style={styles.mapPreview}
+            provider={PROVIDER_GOOGLE}
+            initialRegion={getMapRegion()}
+            liteMode={true}
+            scrollEnabled={false}
+            zoomEnabled={false}
+            rotateEnabled={false}
+            pitchEnabled={false}
+          >
+            <Polyline
+              coordinates={hike.routeCoordinates}
+              strokeWidth={3}
+              strokeColor="#FC4C02"
+              lineCap="round"
+              lineJoin="round"
+            />
+          </MapView>
+          <View style={styles.mapOverlay}>
+            <Ionicons name="map" size={16} color="white" />
+          </View>
+        </View>
+      )}
       
       {/* Media gallery */}
       {renderMedia()}
@@ -512,7 +573,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
   },
-  // Add styles for the inline HikeHistoryItem component
   hikeItem: {
     flex: 1,
     backgroundColor: 'white',
@@ -640,5 +700,25 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontSize: 15,
     color: '#555',
+  },
+  // Add new styles for the map preview
+  mapPreviewContainer: {
+    height: 150,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  mapPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  mapOverlay: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 4,
+    padding: 4,
   },
 });

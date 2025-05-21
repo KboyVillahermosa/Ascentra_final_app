@@ -196,7 +196,12 @@ export default function App() {
               options={{ headerShown: false }} 
             />
             <Stack.Screen name="Tracking" component={TrackingScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="HikeHistory" component={HikeHistoryScreen} options={{ headerShown: false }} />
+            <Stack.Screen 
+              name="HikeHistory" 
+              component={HikeHistoryScreen} 
+              options={{ headerShown: false }} 
+              initialParams={{ userId: null }} // Allow passing userId parameter
+            />
             <Stack.Screen name="SaveActivity" component={SaveActivityScreen} options={{ headerShown: false }} />
             <Stack.Screen 
               name="MediaViewer" 
