@@ -1,23 +1,24 @@
-// Format distance to show as km with one decimal, or in meters if small
-export const formatDistance = (meters, strava = false) => {
-  if (!meters) return '0 m';
+/**
+ * Format distance in meters to Strava-like km display
+ * @param {number} meters - Distance in meters
+ * @returns {string} - Formatted distance string
+ */
+export const formatDistance = (meters) => {
+  // Return 0.00 km if no distance or invalid
+  if (!meters || isNaN(meters) || meters < 0) return '0.00 km';
   
-  if (strava) {
-    // Strava-style formatting
-    if (meters < 1000) {
-      return `${meters.toFixed(0)} m`;
-    } else {
-      const km = meters / 1000;
-      return `${km.toFixed(2)} km`;
-    }
+  // Always show in kilometers with appropriate precision
+  const km = meters / 1000;
+  
+  if (km < 10) {
+    // For distances less than 10km, show two decimal places (e.g., 3.45 km)
+    return `${km.toFixed(2)} km`;
+  } else if (km < 100) {
+    // For distances between 10-100km, show one decimal place (e.g., 15.4 km)
+    return `${km.toFixed(1)} km`;
   } else {
-    // Original formatting
-    if (meters < 1000) {
-      return `${meters.toFixed(0)} m`;
-    } else {
-      const km = meters / 1000;
-      return `${km.toFixed(2)} km`;
-    }
+    // For distances over 100km, show no decimal places (e.g., 103 km)
+    return `${Math.round(km)} km`;
   }
 };
 

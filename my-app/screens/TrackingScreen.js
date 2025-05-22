@@ -504,7 +504,12 @@ export default function TrackingScreen({ navigation }) {
         {tracking && !paused && (
           <View style={styles.mapOverlay}>
             <Text style={styles.mapOverlayText}>
-              {formatDistance(stats.distance)} • {formatDuration(stats.duration)}
+              <Text style={styles.mapDistanceValue}>
+                {(stats.distance / 1000).toFixed(2)}
+              </Text>
+              <Text style={styles.mapDistanceUnit}> km</Text>
+              {" • "}
+              {formatDuration(stats.duration)}
             </Text>
           </View>
         )}
@@ -590,7 +595,9 @@ export default function TrackingScreen({ navigation }) {
                 <View style={styles.modalStatItem}>
                   <Ionicons name="speedometer-outline" size={22} color="#555" />
                   <Text style={styles.modalStatLabel}>Distance</Text>
-                  <Text style={styles.modalStatValue}>{formatDistance(stats.distance)}</Text>
+                  <Text style={styles.modalStatValue}>
+                    {(stats.distance / 1000).toFixed(2)} km
+                  </Text>
                 </View>
                 
                 <View style={styles.modalStatItem}>
@@ -642,7 +649,10 @@ export default function TrackingScreen({ navigation }) {
             <View style={styles.pausedStatsContainer}>
               <View style={styles.pausedStatRow}>
                 <Ionicons name="speedometer-outline" size={20} color="#2E7D32" />
-                <Text style={styles.pausedStat}>{formatDistance(stats.distance)}</Text>
+                <Text style={styles.pausedStat}>
+                  <Text style={styles.pausedStatValue}>{(stats.distance / 1000).toFixed(2)}</Text>
+                  <Text style={styles.pausedStatUnit}> km</Text>
+                </Text>
               </View>
               
               <View style={styles.pausedStatRow}>
@@ -721,6 +731,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  mapDistanceValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+  },
+  mapDistanceUnit: {
+    fontSize: 16,
+    color: '#2E7D32',
   },
   statsContainer: {
     backgroundColor: '#FFFFFF', // White background
@@ -948,6 +967,16 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 14,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  pausedStatValue: {
+    color: '#333333',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  pausedStatUnit: {
+    color: '#333333',
+    fontSize: 18,
+    fontWeight: 'normal',
   },
   resumeOverlayButton: {
     flexDirection: 'row',
