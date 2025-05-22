@@ -14,7 +14,9 @@ import {
   Image,
   StatusBar,
   Platform,
-  Modal
+  Modal,
+  Dimensions,
+  Pressable
 } from 'react-native';
 import { supabase, uploadFileToSupabase } from '../utils/supabase';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -24,6 +26,8 @@ import { Video } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import uuid from 'react-native-uuid';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function ForumPost() {
   const [posts, setPosts] = useState([]);
@@ -38,7 +42,13 @@ export default function ForumPost() {
   const [mediaOptionsVisible, setMediaOptionsVisible] = useState(false);
   const videoRef = useRef(null);
   const [playingVideoId, setPlayingVideoId] = useState(null);
-
+  
+  // New state for fullscreen media viewer
+  const [fullscreenMedia, setFullscreenMedia] = useState(null);
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
+  const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
+  const [currentMediaList, setCurrentMediaList] = useState([]);
+  
   // Get current user on component mount
   useEffect(() => {
     getUser();
@@ -414,6 +424,121 @@ export default function ForumPost() {
     }
   };
 
+  // Open media in fullscreen viewer
+  const openMediaViewer = (mediaItems, index) => {
+    setCurrentMediaList(mediaItems);
+    setCurrentMediaIndex(index);
+    setMediaViewerVisible(true);
+    
+    // Pause any playing video
+    if (videoRef.current && playingVideoId) {
+      videoRef.current.pauseAsync();
+      setPlayingVideoId(null);
+    }
+  };
+  
+  // Close media viewer
+  const closeMediaViewer = () => {
+    setMediaViewerVisible(false);
+  };
+  
+  // Navigate to next media in viewer
+  const goToNextMedia = () => {
+    if (currentMediaIndex < currentMediaList.length - 1) {
+      setCurrentMediaIndex(currentMediaIndex + 1);
+    }
+  };
+  
+  // Navigate to previous media in viewer
+  const goToPrevMedia = () => {
+    if (currentMediaIndex > 0) {
+      setCurrentMediaIndex(currentMediaIndex - 1);
+    }
+  };
+  
+  // Render fullscreen media viewer modal
+  const renderMediaViewer = () => {
+    if (!mediaViewerVisible || currentMediaList.length === 0) return null;
+    
+    const currentMedia = currentMediaList[currentMediaIndex];
+    const isVideo = currentMedia.media_type === 'video';
+    
+    return (
+      <Modal
+        visible={mediaViewerVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={closeMediaViewer}
+      >
+        <View style={styles.mediaViewerContainer}>
+          <View style={styles.mediaViewerHeader}>
+            <TouchableOpacity onPress={closeMediaViewer} style={styles.closeButton}>
+              <Ionicons name="close" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+            <Text style={styles.mediaViewerCounter}>
+              {currentMediaIndex + 1} / {currentMediaList.length}
+            </Text>
+          </View>
+          
+          <View style={styles.mediaViewerContent}>
+            {isVideo ? (
+              <Video
+                source={{ uri: currentMedia.media_url }}
+                rate={1.0}
+                volume={1.0}
+                isMuted={false}
+                resizeMode="contain"
+                shouldPlay={true}
+                useNativeControls
+                style={styles.fullscreenVideo}
+              />
+            ) : (
+              <Image
+                source={{ uri: currentMedia.media_url }}
+                style={styles.fullscreenImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+          
+          {currentMediaList.length > 1 && (
+            <View style={styles.mediaViewerNavigation}>
+              <TouchableOpacity 
+                onPress={goToPrevMedia}
+                disabled={currentMediaIndex === 0}
+                style={[
+                  styles.navButton, 
+                  currentMediaIndex === 0 && styles.navButtonDisabled
+                ]}
+              >
+                <Ionicons 
+                  name="chevron-back" 
+                  size={30} 
+                  color={currentMediaIndex === 0 ? "#888888" : "#FFFFFF"} 
+                />
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                onPress={goToNextMedia}
+                disabled={currentMediaIndex === currentMediaList.length - 1}
+                style={[
+                  styles.navButton, 
+                  currentMediaIndex === currentMediaList.length - 1 && styles.navButtonDisabled
+                ]}
+              >
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={30} 
+                  color={currentMediaIndex === currentMediaList.length - 1 ? "#888888" : "#FFFFFF"} 
+                />
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </Modal>
+    );
+  };
+  
   // Render media preview for uploads
   const renderMediaPreview = () => {
     if (mediaFiles.length === 0) return null;
@@ -450,7 +575,7 @@ export default function ForumPost() {
     );
   };
 
-  // Render media in post
+  // Improved media grid display for posts
   const renderPostMedia = (media) => {
     if (!media || media.length === 0) return null;
     
@@ -460,11 +585,16 @@ export default function ForumPost() {
       
       if (item.media_type === 'image') {
         return (
-          <Image 
-            source={{ uri: item.media_url }} 
-            style={styles.singleMediaImage} 
-            resizeMode="cover"
-          />
+          <TouchableOpacity 
+            onPress={() => openMediaViewer(media, 0)}
+            style={styles.singleMediaContainer}
+          >
+            <Image 
+              source={{ uri: item.media_url }} 
+              style={styles.singleMediaImage} 
+              resizeMode="cover"
+            />
+          </TouchableOpacity>
         );
       } else if (item.media_type === 'video') {
         return (
@@ -485,7 +615,7 @@ export default function ForumPost() {
                 shouldPlay={true}
               />
             ) : (
-              <TouchableOpacity onPress={() => handleVideoPress(item.id)}>
+              <TouchableOpacity onPress={() => openMediaViewer(media, 0)}>
                 <Image 
                   source={{ uri: item.thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
                   style={styles.videoThumbnail}
@@ -500,51 +630,136 @@ export default function ForumPost() {
       }
     }
     
-    // If there are multiple media items
+    // For 2 media items - side by side
+    if (media.length === 2) {
+      return (
+        <View style={styles.mediaGrid}>
+          {media.map((item, index) => (
+            <TouchableOpacity 
+              key={item.id} 
+              style={styles.gridItem2}
+              onPress={() => openMediaViewer(media, index)}
+            >
+              {item.media_type === 'image' ? (
+                <Image 
+                  source={{ uri: item.media_url }} 
+                  style={styles.gridItemImage} 
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.gridItemVideo}>
+                  <Image 
+                    source={{ uri: item.thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
+                    style={styles.gridItemImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.playButtonSmall}>
+                    <Ionicons name="play-circle" size={30} color="#FFF" />
+                  </View>
+                </View>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      );
+    }
+    
+    // For 3 media items - 1 large + 2 small
+    if (media.length === 3) {
+      return (
+        <View style={styles.mediaGrid}>
+          <TouchableOpacity 
+            style={styles.gridItemLarge} 
+            onPress={() => openMediaViewer(media, 0)}
+          >
+            {media[0].media_type === 'image' ? (
+              <Image 
+                source={{ uri: media[0].media_url }} 
+                style={styles.gridItemImage} 
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.gridItemVideo}>
+                <Image 
+                  source={{ uri: media[0].thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
+                  style={styles.gridItemImage}
+                  resizeMode="cover"
+                />
+                <View style={styles.playButtonSmall}>
+                  <Ionicons name="play-circle" size={30} color="#FFF" />
+                </View>
+              </View>
+            )}
+          </TouchableOpacity>
+          
+          <View style={styles.gridItemSmallContainer}>
+            {media.slice(1, 3).map((item, index) => (
+              <TouchableOpacity 
+                key={item.id} 
+                style={styles.gridItemSmall}
+                onPress={() => openMediaViewer(media, index + 1)}
+              >
+                {item.media_type === 'image' ? (
+                  <Image 
+                    source={{ uri: item.media_url }} 
+                    style={styles.gridItemImage} 
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.gridItemVideo}>
+                    <Image 
+                      source={{ uri: item.thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
+                      style={styles.gridItemImage}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.playButtonSmall}>
+                      <Ionicons name="play-circle" size={24} color="#FFF" />
+                    </View>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      );
+    }
+    
+    // For 4 or more media items - grid layout with "more" indicator
     return (
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.postMediaContainer}
-      >
-        {media.map((item) => (
-          <View key={item.id} style={styles.postMediaItem}>
+      <View style={styles.mediaGrid}>
+        {media.slice(0, 4).map((item, index) => (
+          <TouchableOpacity 
+            key={item.id} 
+            style={styles.gridItem4}
+            onPress={() => openMediaViewer(media, index)}
+          >
             {item.media_type === 'image' ? (
               <Image 
                 source={{ uri: item.media_url }} 
-                style={styles.postMediaImage} 
+                style={styles.gridItemImage} 
+                resizeMode="cover"
               />
             ) : (
-              <TouchableOpacity onPress={() => handleVideoPress(item.id)}>
+              <View style={styles.gridItemVideo}>
                 <Image 
                   source={{ uri: item.thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
-                  style={styles.postMediaImage}
+                  style={styles.gridItemImage}
+                  resizeMode="cover"
                 />
-                <View style={styles.playButton}>
-                  <Ionicons name="play-circle" size={30} color="#FFF" />
+                <View style={styles.playButtonSmall}>
+                  <Ionicons name="play-circle" size={24} color="#FFF" />
                 </View>
-                
-                {playingVideoId === item.id && (
-                  <Video
-                    ref={videoRef}
-                    source={{ uri: item.media_url }}
-                    useNativeControls
-                    resizeMode="cover"
-                    isLooping
-                    style={[styles.postMediaImage, styles.activeVideo]}
-                    shouldPlay={true}
-                    onPlaybackStatusUpdate={status => {
-                      if (status.didJustFinish) {
-                        setPlayingVideoId(null);
-                      }
-                    }}
-                  />
-                )}
-              </TouchableOpacity>
+              </View>
             )}
-          </View>
+            
+            {index === 3 && media.length > 4 && (
+              <View style={styles.moreOverlay}>
+                <Text style={styles.moreText}>+{media.length - 4}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
     );
   };
 
@@ -725,6 +940,9 @@ export default function ForumPost() {
           }
         />
       )}
+      
+      {/* Render the fullscreen media viewer modal */}
+      {renderMediaViewer()}
     </SafeAreaView>
   );
 }
@@ -1014,5 +1232,136 @@ const styles = StyleSheet.create({
     color: '#9E9E9E',
     marginTop: 5,
     textAlign: 'center',
-  }
+  },
+  
+  // New and updated styles for responsive media grid
+  singleMediaContainer: {
+    width: '100%',
+    height: 300,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 15,
+  },
+  singleMediaImage: {
+    width: '100%',
+    height: '100%',
+  },
+  mediaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 15,
+  },
+  gridItem2: {
+    width: '49.5%',
+    height: 200,
+    margin: '0.25%',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  gridItem4: {
+    width: '49.5%',
+    height: 150,
+    margin: '0.25%',
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  gridItemLarge: {
+    width: '100%',
+    height: 200,
+    marginBottom: 2,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  gridItemSmallContainer: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  gridItemSmall: {
+    width: '49.5%',
+    height: 150,
+    margin: '0.25%',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  gridItemImage: {
+    width: '100%',
+    height: '100%',
+  },
+  gridItemVideo: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
+  playButtonSmall: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginLeft: -15,
+    marginTop: -15,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 20,
+    padding: 5,
+  },
+  moreOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  moreText: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  
+  // Media viewer modal
+  mediaViewerContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  mediaViewerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingTop: Platform.OS === 'ios' ? 50 : 30,
+    paddingBottom: 15,
+  },
+  closeButton: {
+    padding: 8,
+  },
+  mediaViewerCounter: {
+    color: '#FFFFFF',
+    fontSize: 16,
+  },
+  mediaViewerContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenImage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT * 0.7,
+  },
+  fullscreenVideo: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT * 0.7,
+  },
+  mediaViewerNavigation: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+  },
+  navButton: {
+    padding: 10,
+  },
+  navButtonDisabled: {
+    opacity: 0.5,
+  },
 });
