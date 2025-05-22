@@ -24,6 +24,7 @@ import ChangePasswordScreen from './screens/ChangePasswordScreen';
 import MediaViewerScreen from './screens/MediaViewerScreen';
 import SaveActivityScreen from './screens/SaveActivityScreen';
 import HikeDetailScreen from './screens/HikeDetailScreen';
+import ActivityCommentsScreen from './screens/ActivityCommentsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -214,6 +215,7 @@ export default function App() {
               component={HikeDetailScreen} 
               options={{ headerShown: false }}
             />
+            <Stack.Screen name="ActivityComments" component={ActivityCommentsScreen} options={{ headerShown: false }} />
           </>
         ) : (
           <>

@@ -12,12 +12,16 @@ import {
   RefreshControl,
   StatusBar,
   Dimensions,
-  Platform // Add this import
+  Platform,
+  Modal // Add Modal import
 } from 'react-native'
 import { supabase } from '../utils/supabase'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons'
 import TrackScreen from './TrackScreen'
+import { formatDate, formatDistance, formatDuration } from '../utils/formatters'
+import { getAllHikes } from '../services/databaseService'
+import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps'
 
 const Tab = createBottomTabNavigator()
 const { width } = Dimensions.get('window');
@@ -241,11 +245,22 @@ function HomeContent({ navigation, user }) {
 function ProfileScreen({ user, profile, signOut, navigation }) {
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [bio, setBio] = useState('');
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [hikeRecords, setHikeRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
+  const [mediaItems, setMediaItems] = useState([]);
+  const [initialMediaIndex, setInitialMediaIndex] = useState(0);
+  const { width } = Dimensions.get('window');
+  const CARD_WIDTH = width - 32;
 
   useEffect(() => {
     fetchProfile();
+    fetchHikeRecords();
   }, []);
 
+  // Function to fetch user profile
   async function fetchProfile() {
     try {
       if (!user) return;
@@ -271,6 +286,78 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
     }
   }
 
+  // Function to fetch hike records
+  async function fetchHikeRecords() {
+    try {
+      setLoading(true);
+      // Get hikes from AsyncStorage
+      const hikes = await getAllHikes();
+      
+      // Sort by date (newest first)
+      const sortedHikes = hikes.sort((a, b) => {
+        return new Date(b.date) - new Date(a.date);
+      });
+      
+      // Only show recent 3 hikes in profile
+      const recentHikes = sortedHikes.slice(0, 3);
+      
+      // Add like and comment data (in a real app, this would come from your database)
+      const hikesWithEngagement = recentHikes.map(hike => ({
+        ...hike,
+        likes: Math.floor(Math.random() * 20),
+        comments: Math.floor(Math.random() * 10),
+        isLiked: Math.random() > 0.5
+      }));
+      
+      setHikeRecords(hikesWithEngagement);
+    } catch (error) {
+      console.error('Error fetching hike records:', error);
+      setHikeRecords([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  // Functions for media viewer
+  const handleMediaPress = (media, index) => {
+    setMediaItems(media);
+    setInitialMediaIndex(index);
+    setMediaViewerVisible(true);
+  };
+
+  // Function to toggle like on activity
+  const toggleLike = (activityId) => {
+    setHikeRecords(prevRecords => 
+      prevRecords.map(hike => {
+        if (hike.id === activityId) {
+          const newIsLiked = !hike.isLiked;
+          return {
+            ...hike,
+            isLiked: newIsLiked,
+            likes: newIsLiked ? hike.likes + 1 : hike.likes - 1
+          };
+        }
+        return hike;
+      })
+    );
+    // In a real app, you would update this in your database
+  };
+
+  // Function to navigate to comments - fixed to use direct navigation
+  const navigateToComments = (activityId, activityTitle) => {
+    // Direct navigation to ActivityComments - no nested navigator
+    navigation.navigate('ActivityComments', { 
+      activityId: activityId,
+      activityTitle: activityTitle
+    });
+  };
+
+  // Function to toggle settings modal
+  const toggleSettingsModal = () => {
+    setShowSettingsModal(!showSettingsModal);
+  };
+
   const navigateToEditProfile = () => {
     navigation.navigate('EditProfile');
   };
@@ -279,15 +366,357 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
     navigation.navigate('ChangePassword');
   };
 
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchProfile();
+    fetchHikeRecords();
+  };
+
+  // HikeHistoryItem component
+  const HikeHistoryItem = ({ hike, onPress, onMediaPress, onLike, onComment }) => {
+    // Check if the hike has media files and route coordinates
+    const hasMedia = hike.media && Array.isArray(hike.media) && hike.media.length > 0;
+    const hasRoute = hike.routeCoordinates && Array.isArray(hike.routeCoordinates) && hike.routeCoordinates.length > 1;
+    
+    // Calculate map region
+    const getMapRegion = () => {
+      if (!hasRoute) return {
+        latitude: 0,
+        longitude: 0,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01
+      };
+      
+      // Find min/max coordinates to set boundaries
+      let minLat = hike.routeCoordinates[0].latitude;
+      let maxLat = hike.routeCoordinates[0].latitude;
+      let minLng = hike.routeCoordinates[0].longitude;
+      let maxLng = hike.routeCoordinates[0].longitude;
+      
+      hike.routeCoordinates.forEach(coord => {
+        minLat = Math.min(minLat, coord.latitude);
+        maxLat = Math.max(maxLat, coord.latitude);
+        minLng = Math.min(minLng, coord.longitude);
+        maxLng = Math.max(maxLng, coord.longitude);
+      });
+      
+      // Add padding
+      const latPadding = (maxLat - minLat) * 0.2;
+      const lngPadding = (maxLng - minLng) * 0.2;
+      
+      return {
+        latitude: (minLat + maxLat) / 2,
+        longitude: (minLng + maxLng) / 2,
+        latitudeDelta: Math.max((maxLat - minLat) + latPadding, 0.01),
+        longitudeDelta: Math.max((maxLng - minLng) + lngPadding, 0.01)
+      };
+    };
+    
+    // Get activity icon based on type
+    const getActivityIcon = () => {
+      switch(hike.activityType) {
+        case 'Trail Running': return 'walk';
+        case 'Mountain Biking': return 'bicycle';
+        case 'Backpacking': return 'pin';
+        case 'Rock Climbing': return 'trending-up';
+        case 'Snowshoeing': return 'snow';
+        case 'Exploring': return 'compass';
+        default: return 'footsteps';
+      }
+    };
+    
+    return (
+      <TouchableOpacity 
+        style={styles.hikeCard} 
+        onPress={onPress}
+        activeOpacity={0.9}
+      >
+        {/* Card header with activity type */}
+        <View style={styles.cardHeader}>
+          <View style={styles.activityBadge}>
+            <Ionicons name={getActivityIcon()} size={16} color="white" />
+            <Text style={styles.activityBadgeText}>
+              {hike.activityType || 'Hiking'}
+            </Text>
+          </View>
+        </View>
+        
+        {/* Title and date */}
+        <Text style={styles.hikeTitle}>{hike.title || 'Hiking Activity'}</Text>
+        <Text style={styles.hikeDate}>{formatDate(hike.date)}</Text>
+        
+        {/* Description if available */}
+        {hike.description ? (
+          <Text style={styles.hikeDescription} numberOfLines={2}>
+            {hike.description}
+          </Text>
+        ) : null}
+        
+        {/* Route Map Preview */}
+        {hasRoute && (
+          <View style={styles.mapPreviewContainer}>
+            <MapView
+              style={styles.mapPreview}
+              provider={PROVIDER_GOOGLE}
+              initialRegion={getMapRegion()}
+              liteMode={true}
+              scrollEnabled={false}
+              zoomEnabled={false}
+            >
+              {/* Main route line */}
+              <Polyline
+                coordinates={hike.routeCoordinates}
+                strokeWidth={4}
+                strokeColor="#2E7D32"
+                lineCap="round"
+                lineJoin="round"
+              />
+              
+              {/* Start marker */}
+              <Marker
+                coordinate={hike.routeCoordinates[0]}
+                anchor={{ x: 0.5, y: 0.5 }}
+              >
+                <View style={styles.startMarkerDot}>
+                  <View style={styles.startMarkerInner} />
+                </View>
+              </Marker>
+              
+              {/* End marker */}
+              <Marker
+                coordinate={hike.routeCoordinates[hike.routeCoordinates.length - 1]}
+                anchor={{ x: 0.5, y: 0.5 }}
+              >
+                <View style={styles.endMarkerDot}>
+                  <View style={styles.endMarkerInner} />
+                </View>
+              </Marker>
+            </MapView>
+          </View>
+        )}
+        
+        {/* Render a single media item preview */}
+        {hasMedia && (
+          <TouchableOpacity
+            onPress={() => onMediaPress(hike.media, 0)}
+            style={styles.singleMediaContainer}
+          >
+            <Image 
+              source={{ uri: hike.media[0].uri }} 
+              style={styles.singleMediaImage}
+              resizeMode="cover"
+            />
+            {hike.media.length > 1 && (
+              <View style={styles.moreMediaBadge}>
+                <Text style={styles.moreMediaText}>+{hike.media.length - 1}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+        
+        {/* Stats row */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statItem}>
+            <Ionicons name="navigate" size={18} color="#2E7D32" />
+            <Text style={styles.statLabel}>Distance</Text>
+            <Text style={styles.statValue}>{formatDistance(hike.distance)}</Text>
+          </View>
+          
+          <View style={styles.divider} />
+          
+          <View style={styles.statItem}>
+            <Ionicons name="time" size={18} color="#2E7D32" />
+            <Text style={styles.statLabel}>Duration</Text>
+            <Text style={styles.statValue}>{formatDuration(hike.duration)}</Text>
+          </View>
+          
+          <View style={styles.divider} />
+          
+          <View style={styles.statItem}>
+            <Ionicons name="trending-up" size={18} color="#2E7D32" />
+            <Text style={styles.statLabel}>Elevation</Text>
+            <Text style={styles.statValue}>{(hike.elevation || 0).toFixed(0)}m</Text>
+          </View>
+        </View>
+        
+        {/* Engagement stats */}
+        <View style={styles.engagementContainer}>
+          <Text style={styles.engagementText}>
+            {hike.likes} likes • {hike.comments} comments
+          </Text>
+          
+          <View style={styles.engagementActions}>
+            <TouchableOpacity
+              style={styles.engagementAction}
+              onPress={() => onLike(hike.id)}
+            >
+              <Ionicons 
+                name={hike.isLiked ? "heart" : "heart-outline"} 
+                size={22} 
+                color={hike.isLiked ? "#F44336" : "#757575"} 
+              />
+              <Text style={[styles.engagementActionText, hike.isLiked && styles.engagementActionActive]}>
+                Like
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.engagementAction}
+              onPress={() => onComment(hike.id, hike.title)}
+            >
+              <Ionicons name="chatbubble-outline" size={20} color="#757575" />
+              <Text style={styles.engagementActionText}>Comment</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // Media Viewer Modal
+  const MediaViewerModal = () => (
+    <Modal
+      animationType="fade"
+      transparent={false}
+      visible={mediaViewerVisible}
+      onRequestClose={() => setMediaViewerVisible(false)}
+    >
+      <View style={styles.mediaViewerContainer}>
+        <TouchableOpacity 
+          style={styles.mediaViewerCloseBtn}
+          onPress={() => setMediaViewerVisible(false)}
+        >
+          <Ionicons name="close" size={28} color="white" />
+        </TouchableOpacity>
+        
+        {mediaItems.length > 0 && (
+          <Image 
+            source={{ uri: mediaItems[initialMediaIndex].uri }} 
+            style={styles.fullScreenMedia}
+            resizeMode="contain"
+          />
+        )}
+        
+        {/* Navigation buttons for prev/next image */}
+        <View style={styles.mediaNavigation}>
+          <TouchableOpacity 
+            style={styles.mediaNavButton}
+            onPress={() => setInitialMediaIndex(Math.max(0, initialMediaIndex - 1))}
+            disabled={initialMediaIndex === 0}
+          >
+            <Ionicons 
+              name="chevron-back" 
+              size={32} 
+              color={initialMediaIndex === 0 ? "#555" : "white"} 
+            />
+          </TouchableOpacity>
+          
+          <Text style={styles.mediaCounter}>{initialMediaIndex + 1}/{mediaItems.length}</Text>
+          
+          <TouchableOpacity 
+            style={styles.mediaNavButton}
+            onPress={() => setInitialMediaIndex(Math.min(mediaItems.length - 1, initialMediaIndex + 1))}
+            disabled={initialMediaIndex === mediaItems.length - 1}
+          >
+            <Ionicons 
+              name="chevron-forward" 
+              size={32} 
+              color={initialMediaIndex === mediaItems.length - 1 ? "#555" : "white"} 
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaView style={styles.profileContainer}>
       <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
       
       <View style={styles.profileHeader}>
         <Text style={styles.profileHeaderTitle}>Profile</Text>
+        <TouchableOpacity 
+          style={styles.settingsButton}
+          onPress={toggleSettingsModal}
+        >
+          <Ionicons name="settings-outline" size={24} color="#212121" />
+        </TouchableOpacity>
       </View>
       
-      <ScrollView style={styles.profileScrollView}>
+      {/* Settings Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showSettingsModal}
+        onRequestClose={toggleSettingsModal}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={toggleSettingsModal}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Settings</Text>
+              
+              <TouchableOpacity 
+                style={styles.settingsOption}
+                onPress={() => {
+                  toggleSettingsModal();
+                  navigateToEditProfile();
+                }}
+              >
+                <Ionicons name="person-outline" size={22} color="#333" />
+                <Text style={styles.settingsOptionText}>Edit Profile</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.settingsOption}
+                onPress={() => {
+                  toggleSettingsModal();
+                  navigateToChangePassword();
+                }}
+              >
+                <Ionicons name="key-outline" size={22} color="#333" />
+                <Text style={styles.settingsOptionText}>Change Password</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.settingsOption, styles.signOutOption]}
+                onPress={() => {
+                  toggleSettingsModal();
+                  signOut();
+                }}
+              >
+                <Ionicons name="log-out-outline" size={22} color="#F44336" />
+                <Text style={[styles.settingsOptionText, styles.signOutText]}>Sign Out</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={toggleSettingsModal}
+              >
+                <Text style={styles.closeButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+      
+      {/* Media Viewer Modal */}
+      <MediaViewerModal />
+      
+      <ScrollView 
+        style={styles.profileScrollView}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={["#388E3C"]}
+            tintColor="#388E3C"
+          />
+        }
+      >
         <View style={styles.profileContent}>
           {/* Profile image */}
           {avatarUrl ? (
@@ -315,8 +744,8 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
           
           <View style={styles.profileStats}>
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>0</Text>
-              <Text style={styles.statLabel}>Hikes</Text>
+              <Text style={styles.statNumber}>{hikeRecords.length}</Text>
+              <Text style={styles.statLabel}>Activities</Text>
             </View>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>0</Text>
@@ -327,33 +756,49 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
               <Text style={styles.statLabel}>Favorites</Text>
             </View>
           </View>
+        </View>
+        
+        {/* Activity History Section */}
+        <View style={styles.activityHistorySection}>
+          <View style={styles.activitySectionHeader}>
+            <Text style={styles.activitySectionTitle}>Activity History</Text>
+            <TouchableOpacity 
+              style={styles.viewAllButton}
+              onPress={() => navigation.navigate('HikeHistory')}
+            >
+              <Text style={styles.viewAllText}>View All</Text>
+            </TouchableOpacity>
+          </View>
           
-          {/* Edit Profile Button */}
-          <TouchableOpacity 
-            style={styles.profileActionButton}
-            onPress={navigateToEditProfile}
-          >
-            <Ionicons name="create-outline" size={20} color="white" />
-            <Text style={styles.profileActionButtonText}>Edit Profile</Text>
-          </TouchableOpacity>
-          
-          {/* Change Password Button */}
-          <TouchableOpacity 
-            style={styles.profileActionButton}
-            onPress={navigateToChangePassword}
-          >
-            <Ionicons name="key-outline" size={20} color="white" />
-            <Text style={styles.profileActionButtonText}>Change Password</Text>
-          </TouchableOpacity>
-          
-          {/* Sign Out Button */}
-          <TouchableOpacity 
-            style={[styles.profileActionButton, styles.signOutButton]} 
-            onPress={signOut}
-          >
-            <MaterialIcons name="logout" size={20} color="white" />
-            <Text style={styles.signOutButtonText}>Sign Out</Text>
-          </TouchableOpacity>
+          {loading ? (
+            <ActivityIndicator size="large" color="#2E7D32" style={{padding: 20}} />
+          ) : hikeRecords.length > 0 ? (
+            hikeRecords.map(hike => (
+              <HikeHistoryItem 
+                key={hike.id}
+                hike={hike}
+                onPress={() => navigation.navigate('HikeDetail', { hikeId: hike.id })}
+                onMediaPress={handleMediaPress}
+                onLike={toggleLike}
+                onComment={navigateToComments}
+              />
+            ))
+          ) : (
+            <View style={styles.emptyActivitiesContainer}>
+              <Ionicons name="footsteps-outline" size={60} color="#DDD" />
+              <Text style={styles.emptyActivitiesTitle}>No Activities Yet</Text>
+              <Text style={styles.emptyActivitiesText}>
+                Start tracking to record your hiking adventures.
+              </Text>
+              <TouchableOpacity
+                style={styles.startTrackingButton}
+                onPress={() => navigation.navigate('Track')}
+              >
+                <Text style={styles.startTrackingText}>Start Tracking</Text>
+                <Ionicons name="arrow-forward" size={16} color="white" />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -689,11 +1134,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   profileHeader: {
-    backgroundColor: '#FFFFFF', // White header for minimalist look
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 20,
     paddingTop: Platform.OS === 'android' ? 50 : 30,
     paddingBottom: 20,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
@@ -702,6 +1149,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#212121',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  settingsButton: {
+    position: 'absolute',
+    right: 20,
+    padding: 8,
   },
   profileScrollView: {
     flex: 1,
@@ -832,5 +1284,347 @@ const styles = StyleSheet.create({
     width:100, // Smaller logo
     height: 100, // Smaller logo
     resizeMode: 'contain',
+  },
+  
+  // New styles for profile header with settings button
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '85%',
+    backgroundColor: 'white',
+    borderRadius: 15,
+    overflow: 'hidden',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  modalContent: {
+    paddingTop: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 15,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  settingsOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  settingsOptionText: {
+    fontSize: 16,
+    marginLeft: 15,
+    color: '#333',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  signOutOption: {
+    borderBottomWidth: 0,
+  },
+  signOutText: {
+    color: '#F44336',
+  },
+  closeButton: {
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    paddingVertical: 15,
+    alignItems: 'center',
+    backgroundColor: '#F8F8F8',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#007AFF',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  
+  // Activity History styles
+  activityHistorySection: {
+    marginTop: 15,
+    backgroundColor: '#FFFFFF',
+    paddingBottom: 20,
+  },
+  activitySectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  activitySectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#212121',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  viewAllButton: {
+    padding: 5,
+  },
+  viewAllText: {
+    color: '#388E3C',
+    fontSize: 14,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  hikeCard: {
+    marginHorizontal: 15,
+    marginTop: 15,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  cardHeader: {
+    padding: 12,
+    backgroundColor: '#2E7D32',
+  },
+  activityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#388E3C',
+    borderRadius: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    alignSelf: 'flex-start',
+  },
+  activityBadgeText: {
+    fontSize: 14,
+    color: 'white',
+    marginLeft: 4,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  hikeTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 12,
+    marginBottom: 4,
+    paddingHorizontal: 15,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  hikeDate: {
+    fontSize: 14,
+    color: '#666',
+    paddingHorizontal: 15,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  hikeDescription: {
+    fontSize: 14,
+    color: '#333',
+    marginTop: 8,
+    marginBottom: 12,
+    paddingHorizontal: 15,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  mapPreviewContainer: {
+    height: 180,
+    marginHorizontal: 15,
+    marginVertical: 10,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  mapPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  singleMediaContainer: {
+    height: 180,
+    marginHorizontal: 15,
+    marginVertical: 10,
+    borderRadius: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  singleMediaImage: {
+    width: '100%',
+    height: '100%',
+  },
+  moreMediaBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 16,
+  },
+  moreMediaText: {
+    color: 'white',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+  },
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  statValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  divider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#F0F0F0',
+  },
+  engagementContainer: {
+    padding: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  engagementText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  engagementActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  },
+  engagementAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 20,
+  },
+  engagementActionText: {
+    fontSize: 14,
+    color: '#757575',
+    marginLeft: 6,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  engagementActionActive: {
+    color: '#F44336',
+  },
+  emptyActivitiesContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+    margin: 15,
+  },
+  emptyActivitiesTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 15,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  emptyActivitiesText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  startTrackingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2E7D32',
+    borderRadius: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    marginTop: 15,
+  },
+  startTrackingText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 5,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  mediaViewerContainer: {
+    flex: 1,
+    backgroundColor: 'black',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaViewerCloseBtn: {
+    position: 'absolute',
+    top: 40,
+    right: 16,
+    zIndex: 1,
+  },
+  fullScreenMedia: {
+    width: '100%',
+    height: '100%',
+  },
+  mediaNavigation: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaNavButton: {
+    padding: 16,
+  },
+  mediaCounter: {
+    fontSize: 16,
+    color: 'white',
+    marginHorizontal: 16,
+  },
+  startMarkerDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(46, 125, 50, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  startMarkerInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#2E7D32',
+  },
+  endMarkerDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(211, 47, 47, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  endMarkerInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#D32F2F',
   },
 })

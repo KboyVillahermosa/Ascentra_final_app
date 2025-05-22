@@ -9,7 +9,8 @@ import {
   FlatList,
   RefreshControl,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal
 } from 'react-native';
 import { supabase } from '../utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +35,7 @@ export default function ProfileScreen({ route, navigation }) {
   // Add state for hikes
   const [hikes, setHikes] = useState([]);
   const [hikesLoading, setHikesLoading] = useState(true);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   // Determine if we're viewing the current user's profile or someone else's
   const isOwnProfile = !userId || (currentUser && userId === currentUser.id);
@@ -266,6 +268,38 @@ export default function ProfileScreen({ route, navigation }) {
     navigation.navigate('EditProfile');
   }
 
+  async function handleSignOut() {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }]
+      });
+    } catch (error) {
+      console.error('Error signing out:', error.message);
+      Alert.alert('Sign Out Failed', error.message);
+    }
+  }
+
+  function openSettingsModal() {
+    setShowSettingsModal(true);
+  }
+
+  function closeSettingsModal() {
+    setShowSettingsModal(false);
+  }
+
+  function navigateToChangePassword() {
+    closeSettingsModal();
+    navigation.navigate('ChangePassword');
+  }
+
+  function navigateToEditProfile() {
+    closeSettingsModal();
+    navigation.navigate('EditProfile');
+  }
+
   function renderPostItem({ item }) {
     return (
       <View style={styles.postCard}>
@@ -388,24 +422,84 @@ export default function ProfileScreen({ route, navigation }) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>
+          {isOwnProfile ? 'My Profile' : `${profile?.username || 'User'}'s Profile`}
+        </Text>
+        {isOwnProfile ? (
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={openSettingsModal}
+          >
+            <Ionicons name="settings-outline" size={24} color="#333" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerRight} />
+        )}
+      </View>
+      
+      {/* Settings Modal */}
+      <Modal
+        visible={showSettingsModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={closeSettingsModal}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={closeSettingsModal}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Settings</Text>
+              
+              <TouchableOpacity 
+                style={styles.settingsOption}
+                onPress={navigateToEditProfile}
+              >
+                <Ionicons name="person-outline" size={22} color="#333" />
+                <Text style={styles.settingsOptionText}>Edit Profile</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.settingsOption}
+                onPress={navigateToChangePassword}
+              >
+                <Ionicons name="key-outline" size={22} color="#333" />
+                <Text style={styles.settingsOptionText}>Change Password</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.settingsOption, styles.signOutOption]}
+                onPress={handleSignOut}
+              >
+                <Ionicons name="log-out-outline" size={22} color="#FF3B30" />
+                <Text style={[styles.settingsOptionText, styles.signOutText]}>Sign Out</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={closeSettingsModal}
+              >
+                <Text style={styles.closeButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+      
       <ScrollView
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#333" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            {isOwnProfile ? 'My Profile' : `${profile?.username || 'User'}'s Profile`}
-          </Text>
-          <View style={styles.headerRight} />
-        </View>
-        
         <View style={styles.profileSection}>
           <Image 
             source={{ 
@@ -418,15 +512,6 @@ export default function ProfileScreen({ route, navigation }) {
           
           {profile?.bio && (
             <Text style={styles.profileBio}>{profile.bio}</Text>
-          )}
-          
-          {isOwnProfile && (
-            <TouchableOpacity 
-              style={styles.editProfileButton}
-              onPress={() => navigation.navigate('EditProfile')}
-            >
-              <Text style={styles.editProfileText}>Edit Profile</Text>
-            </TouchableOpacity>
           )}
           
           <View style={styles.statsRow}>
@@ -516,7 +601,6 @@ export default function ProfileScreen({ route, navigation }) {
   );
 }
 
-// Add new styles for hiking activities
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -823,5 +907,66 @@ const styles = StyleSheet.create({
   startTrackingText: {
     color: '#FFF',
     fontWeight: 'bold',
+  },
+  settingsButton: {
+    padding: 5,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '85%',
+    backgroundColor: 'white',
+    borderRadius: 15,
+    overflow: 'hidden',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  modalContent: {
+    paddingTop: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  settingsOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  settingsOptionText: {
+    fontSize: 16,
+    marginLeft: 15,
+    color: '#333',
+  },
+  signOutOption: {
+    borderBottomWidth: 0,
+  },
+  signOutText: {
+    color: '#FF3B30',
+  },
+  closeButton: {
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    paddingVertical: 15,
+    alignItems: 'center',
+    backgroundColor: '#F8F8F8',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#007AFF',
   },
 });
