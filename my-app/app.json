@@ -34,6 +34,9 @@
             "scheme": "hikewise"
           }
         }
+      ],
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -49,6 +52,11 @@
           "cameraPermission": "The app accesses your camera to let you take photos of your hikes."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "83c308b7-7b8f-4f3b-9e26-73a1ca42ee31"
+      }
+    }
   }
 }

@@ -19,6 +19,7 @@ import { supabase } from '../utils/supabase'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons'
 import TrackScreen from './TrackScreen'
+import ForumPost from './ForumPost' // Add this import
 import { formatDate, formatDistance, formatDuration } from '../utils/formatters'
 import { getAllHikes } from '../services/databaseService'
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps'
@@ -898,6 +899,16 @@ export default function HomeScreen({ navigation }) {
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="footsteps" color={color} size={size} />
+          ),
+        }}
+      />
+      
+      <Tab.Screen 
+        name="Forum" 
+        component={ForumPost}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="chatbubbles" color={color} size={size} />
           ),
         }}
       />
