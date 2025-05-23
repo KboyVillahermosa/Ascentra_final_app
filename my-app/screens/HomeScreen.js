@@ -13,16 +13,20 @@ import {
   StatusBar,
   Dimensions,
   Platform,
-  Modal // Add Modal import
+  Modal,
+  TextInput,
+  FlatList,
+  KeyboardAvoidingView
 } from 'react-native'
 import { supabase } from '../utils/supabase'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons'
 import TrackScreen from './TrackScreen'
-import ForumPost from './ForumPost' // Add this import
+import ForumPost from './ForumPost'
 import { formatDate, formatDistance, formatDuration } from '../utils/formatters'
 import { getAllHikes } from '../services/databaseService'
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps'
+import { CommonActions } from '@react-navigation/native';
 
 const Tab = createBottomTabNavigator()
 const { width } = Dimensions.get('window');
@@ -243,7 +247,7 @@ function HomeContent({ navigation, user }) {
   )
 }
 
-function ProfileScreen({ user, profile, signOut, navigation }) {
+function ProfileScreen({ user, profile, signOut, navigation, route }) {
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [bio, setBio] = useState('');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -253,13 +257,38 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
   const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
   const [mediaItems, setMediaItems] = useState([]);
   const [initialMediaIndex, setInitialMediaIndex] = useState(0);
+  
+  // New state for comments
+  const [commentModalVisible, setCommentModalVisible] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState('');
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [submittingComment, setSubmittingComment] = useState(false);
+  
+  // Add state to track if we're viewing another user's profile
+  const [viewingUserId, setViewingUserId] = useState(null);
+  const [viewingUserProfile, setViewingUserProfile] = useState(null);
+  const [isOwnProfile, setIsOwnProfile] = useState(true);
+  
   const { width } = Dimensions.get('window');
   const CARD_WIDTH = width - 32;
 
   useEffect(() => {
-    fetchProfile();
-    fetchHikeRecords();
-  }, []);
+    // Check if we're viewing another user's profile from route params
+    if (route?.params?.userId && route.params.userId !== user?.id) {
+      setViewingUserId(route.params.userId);
+      setIsOwnProfile(false);
+      fetchUserProfile(route.params.userId);
+      fetchUserHikeRecords(route.params.userId);
+    } else {
+      setIsOwnProfile(true);
+      setViewingUserId(null);
+      setViewingUserProfile(null);
+      fetchProfile();
+      fetchHikeRecords();
+    }
+  }, [route?.params?.userId, user?.id]);
 
   // Function to fetch user profile
   async function fetchProfile() {
@@ -287,7 +316,35 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
     }
   }
 
-  // Function to fetch hike records
+  // Function to fetch another user's profile
+  async function fetchUserProfile(userId) {
+    try {
+      setLoading(true);
+      
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('username, bio, avatar_url')
+        .eq('id', userId)
+        .single();
+        
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching user profile:', error);
+        return;
+      }
+      
+      if (data) {
+        setViewingUserProfile(data);
+        setBio(data.bio || 'No bio available.');
+        setAvatarUrl(data.avatar_url);
+      }
+    } catch (error) {
+      console.error('Error:', error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Modified function to fetch hike records with actual like data
   async function fetchHikeRecords() {
     try {
       setLoading(true);
@@ -302,15 +359,37 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
       // Only show recent 3 hikes in profile
       const recentHikes = sortedHikes.slice(0, 3);
       
-      // Add like and comment data (in a real app, this would come from your database)
-      const hikesWithEngagement = recentHikes.map(hike => ({
-        ...hike,
-        likes: Math.floor(Math.random() * 20),
-        comments: Math.floor(Math.random() * 10),
-        isLiked: Math.random() > 0.5
+      // Fetch real like and comment data from Supabase
+      const enhancedHikes = await Promise.all(recentHikes.map(async (hike) => {
+        // Get like count
+        const { count: likesCount, error: likesError } = await supabase
+          .from('activity_likes')
+          .select('id', { count: 'exact', head: true })
+          .eq('activity_id', hike.id);
+          
+        // Check if current user has liked this activity
+        const { data: userLike, error: userLikeError } = await supabase
+          .from('activity_likes')
+          .select('id')
+          .eq('activity_id', hike.id)
+          .eq('user_id', user?.id)
+          .maybeSingle();
+          
+        // Get comment count
+        const { count: commentsCount, error: commentsError } = await supabase
+          .from('activity_comments')
+          .select('id', { count: 'exact', head: true })
+          .eq('activity_id', hike.id);
+          
+        return {
+          ...hike,
+          likes: likesCount || 0,
+          comments: commentsCount || 0,
+          isLiked: !!userLike
+        };
       }));
       
-      setHikeRecords(hikesWithEngagement);
+      setHikeRecords(enhancedHikes);
     } catch (error) {
       console.error('Error fetching hike records:', error);
       setHikeRecords([]);
@@ -320,6 +399,258 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
     }
   }
 
+  // Function to fetch another user's hike records
+  async function fetchUserHikeRecords(userId) {
+    try {
+      setLoading(true);
+      
+      // Fetch hikes from the database for a specific user
+      const { data: hikes, error } = await supabase
+        .from('hikes')
+        .select('*')
+        .eq('user_id', userId)
+        .order('date', { ascending: false })
+        .limit(10); // Increased the limit to show more activities
+        
+      if (error) {
+        console.error('Error fetching user hikes:', error);
+        setHikeRecords([]);
+        return;
+      }
+      
+      // Fetch real like and comment data from Supabase
+      const enhancedHikes = await Promise.all((hikes || []).map(async (hike) => {
+        // Get like count
+        const { count: likesCount, error: likesError } = await supabase
+          .from('activity_likes')
+          .select('id', { count: 'exact', head: true })
+          .eq('activity_id', hike.id);
+          
+        // Check if current user has liked this activity
+        const { data: userLike, error: userLikeError } = await supabase
+          .from('activity_likes')
+          .select('id')
+          .eq('activity_id', hike.id)
+          .eq('user_id', user?.id)
+          .maybeSingle();
+          
+        // Get comment count
+        const { count: commentsCount, error: commentsError } = await supabase
+          .from('activity_comments')
+          .select('id', { count: 'exact', head: true })
+          .eq('activity_id', hike.id);
+          
+        return {
+          ...hike,
+          likes: likesCount || 0,
+          comments: commentsCount || 0,
+          isLiked: !!userLike,
+          // Ensure the hike has the same properties that we need
+          media: hike.media || [],
+          routeCoordinates: hike.routeCoordinates || [],
+          // Make sure we record the original owner
+          userId: userId
+        };
+      }));
+      
+      setHikeRecords(enhancedHikes);
+    } catch (error) {
+      console.error('Error fetching user hike records:', error);
+      setHikeRecords([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  // New function to toggle like on activity
+  const toggleLike = async (activityId) => {
+    if (!user) {
+      Alert.alert('Login Required', 'Please log in to like activities');
+      return;
+    }
+    
+    try {
+      // Find the activity in state
+      const activity = hikeRecords.find(h => h.id === activityId);
+      
+      if (!activity) {
+        console.error('Activity not found:', activityId);
+        return;
+      }
+      
+      if (activity.isLiked) {
+        // Unlike the activity
+        const { error } = await supabase
+          .from('activity_likes')
+          .delete()
+          .eq('activity_id', activityId)
+          .eq('user_id', user.id);
+          
+        if (error) {
+          console.error('Error unliking activity:', error);
+          throw error;
+        }
+        
+        // Update UI immediately
+        setHikeRecords(prevRecords => 
+          prevRecords.map(hike => {
+            if (hike.id === activityId) {
+              return {
+                ...hike,
+                isLiked: false,
+                likes: Math.max(0, hike.likes - 1)
+              };
+            }
+            return hike;
+          })
+        );
+      } else {
+        // Like the activity
+        const { error } = await supabase
+          .from('activity_likes')
+          .insert({
+            activity_id: activityId,
+            user_id: user.id
+          });
+          
+        if (error) {
+          console.error('Error liking activity:', error);
+          throw error;
+        }
+        
+        // Update UI immediately
+        setHikeRecords(prevRecords => 
+          prevRecords.map(hike => {
+            if (hike.id === activityId) {
+              return {
+                ...hike,
+                isLiked: true,
+                likes: hike.likes + 1
+              };
+            }
+            return hike;
+          })
+        );
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      Alert.alert('Error', 'Could not update like status');
+    }
+  };
+
+  // New function to open comments modal
+  const openComments = async (activityId, activityTitle) => {
+    if (!user) {
+      Alert.alert('Login Required', 'Please log in to view and add comments');
+      return;
+    }
+    
+    setSelectedActivity({ id: activityId, title: activityTitle });
+    setCommentModalVisible(true);
+    await fetchComments(activityId);
+  };
+  
+  // New function to fetch comments for an activity
+  const fetchComments = async (activityId) => {
+    try {
+      setLoadingComments(true);
+      
+      const { data, error } = await supabase
+        .from('activity_comments')
+        .select('*')
+        .eq('activity_id', activityId)
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      
+      setComments(data || []);
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+      Alert.alert('Error', 'Could not load comments');
+    } finally {
+      setLoadingComments(false);
+    }
+  };
+  
+  // New function to submit a comment
+  const submitComment = async () => {
+    if (!newComment.trim() || !user || !selectedActivity) return;
+    
+    try {
+      setSubmittingComment(true);
+      
+      // Get username from profile
+      const username = profile?.username || user.email.split('@')[0];
+      
+      const { data, error } = await supabase
+        .from('activity_comments')
+        .insert({
+          activity_id: selectedActivity.id,
+          user_id: user.id,
+          comment: newComment.trim(),
+          username: username
+        })
+        .select();
+        
+      if (error) throw error;
+      
+      // Add the new comment to the list
+      setComments(prevComments => [data[0], ...prevComments]);
+      setNewComment('');
+      
+      // Update the comment count in the hikeRecords
+      setHikeRecords(prevRecords => 
+        prevRecords.map(hike => {
+          if (hike.id === selectedActivity.id) {
+            return {
+              ...hike,
+              comments: hike.comments + 1
+            };
+          }
+          return hike;
+        })
+      );
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      Alert.alert('Error', 'Could not add comment');
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  // New function to delete a comment
+  const deleteComment = async (commentId) => {
+    try {
+      const { error } = await supabase
+        .from('activity_comments')
+        .delete()
+        .eq('id', commentId)
+        .eq('user_id', user.id);
+        
+      if (error) throw error;
+      
+      // Remove the deleted comment from the list
+      setComments(prevComments => prevComments.filter(comment => comment.id !== commentId));
+      
+      // Update the comment count in the hikeRecords
+      setHikeRecords(prevRecords => 
+        prevRecords.map(hike => {
+          if (hike.id === selectedActivity.id) {
+            return {
+              ...hike,
+              comments: Math.max(0, hike.comments - 1)
+            };
+          }
+          return hike;
+        })
+      );
+    } catch (error) {
+      console.error('Error deleting comment:', error);
+      Alert.alert('Error', 'Could not delete comment');
+    }
+  };
+
   // Functions for media viewer
   const handleMediaPress = (media, index) => {
     setMediaItems(media);
@@ -327,54 +658,8 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
     setMediaViewerVisible(true);
   };
 
-  // Function to toggle like on activity
-  const toggleLike = (activityId) => {
-    setHikeRecords(prevRecords => 
-      prevRecords.map(hike => {
-        if (hike.id === activityId) {
-          const newIsLiked = !hike.isLiked;
-          return {
-            ...hike,
-            isLiked: newIsLiked,
-            likes: newIsLiked ? hike.likes + 1 : hike.likes - 1
-          };
-        }
-        return hike;
-      })
-    );
-    // In a real app, you would update this in your database
-  };
-
-  // Function to navigate to comments - fixed to use direct navigation
-  const navigateToComments = (activityId, activityTitle) => {
-    // Direct navigation to ActivityComments - no nested navigator
-    navigation.navigate('ActivityComments', { 
-      activityId: activityId,
-      activityTitle: activityTitle
-    });
-  };
-
-  // Function to toggle settings modal
-  const toggleSettingsModal = () => {
-    setShowSettingsModal(!showSettingsModal);
-  };
-
-  const navigateToEditProfile = () => {
-    navigation.navigate('EditProfile');
-  };
-
-  const navigateToChangePassword = () => {
-    navigation.navigate('ChangePassword');
-  };
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchProfile();
-    fetchHikeRecords();
-  };
-
-  // HikeHistoryItem component
-  const HikeHistoryItem = ({ hike, onPress, onMediaPress, onLike, onComment }) => {
+  // HikeHistoryItem component (updated)
+  const HikeHistoryItem = ({ hike, onPress, onMediaPress, onLike, onComment, isOwnProfile }) => {
     // Check if the hike has media files and route coordinates
     const hasMedia = hike.media && Array.isArray(hike.media) && hike.media.length > 0;
     const hasRoute = hike.routeCoordinates && Array.isArray(hike.routeCoordinates) && hike.routeCoordinates.length > 1;
@@ -563,7 +848,7 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
             
             <TouchableOpacity
               style={styles.engagementAction}
-              onPress={() => onComment(hike.id, hike.title)}
+              onPress={() => onComment(hike.id, hike.title || 'Activity')}
             >
               <Ionicons name="chatbubble-outline" size={20} color="#757575" />
               <Text style={styles.engagementActionText}>Comment</Text>
@@ -629,83 +914,242 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
       </View>
     </Modal>
   );
+  
+  // New Comments Modal
+  const CommentsModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={false}
+      visible={commentModalVisible}
+      onRequestClose={() => setCommentModalVisible(false)}
+    >
+      <SafeAreaView style={styles.commentModalContainer}>
+        <View style={styles.commentModalHeader}>
+          <TouchableOpacity
+            style={styles.commentBackButton}
+            onPress={() => setCommentModalVisible(false)}
+          >
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.commentModalTitle}>
+            Comments {selectedActivity?.title ? `• ${selectedActivity.title}` : ''}
+          </Text>
+        </View>
+        
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.commentContent}
+          keyboardVerticalOffset={100}
+        >
+          {loadingComments ? (
+            <ActivityIndicator size="large" color="#2E7D32" style={{marginTop: 20}} />
+          ) : comments.length === 0 ? (
+            <View style={styles.emptyCommentsContainer}>
+              <Ionicons name="chatbubbles-outline" size={60} color="#DDD" />
+              <Text style={styles.emptyCommentsText}>No comments yet</Text>
+              <Text style={styles.emptyCommentsSubtext}>Be the first to leave a comment</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={comments}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <View style={styles.commentItem}>
+                  <View style={styles.commentHeader}>
+                    <View style={styles.commentUser}>
+                      <View style={styles.commentAvatar}>
+                        <Text style={styles.commentAvatarText}>
+                          {(item.username || 'User').charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text style={styles.commentUsername}>{item.username || 'User'}</Text>
+                        <Text style={styles.commentTime}>
+                          {new Date(item.created_at).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    {item.user_id === user?.id && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          Alert.alert(
+                            'Delete Comment',
+                            'Are you sure you want to delete this comment?',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              { 
+                                text: 'Delete', 
+                                style: 'destructive',
+                                onPress: () => deleteComment(item.id)
+                              }
+                            ]
+                          );
+                        }}
+                      >
+                        <Ionicons name="trash-outline" size={20} color="#F44336" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <Text style={styles.commentText}>{item.comment}</Text>
+                </View>
+              )}
+              contentContainerStyle={styles.commentsList}
+            />
+          )}
+          
+          <View style={styles.addCommentContainer}>
+            <TextInput
+              style={styles.commentInput}
+              placeholder="Add a comment..."
+              value={newComment}
+              onChangeText={setNewComment}
+              multiline
+              maxLength={500}
+            />
+            <TouchableOpacity
+              style={[
+                styles.postCommentButton,
+                (!newComment.trim() || submittingComment) && styles.disabledButton
+              ]}
+              onPress={submitComment}
+              disabled={!newComment.trim() || submittingComment}
+            >
+              {submittingComment ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Ionicons name="send" size={20} color="white" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </Modal>
+  );
+
+  // Add this missing function to handle the onRefresh action
+  const onRefresh = () => {
+    setRefreshing(true);
+    if (isOwnProfile) {
+      fetchProfile();
+      fetchHikeRecords();
+    } else if (viewingUserId) {
+      fetchUserProfile(viewingUserId);
+      fetchUserHikeRecords(viewingUserId);
+    }
+  };
+
+  // Add this missing function to toggle the settings modal
+  const toggleSettingsModal = () => {
+    setShowSettingsModal(prevState => !prevState);
+  };
+
+  // Define navigation functions
+  const navigateToEditProfile = () => {
+    navigation.navigate('EditProfile');
+  };
+
+  const navigateToChangePassword = () => {
+    navigation.navigate('ChangePassword');
+  };
 
   return (
     <SafeAreaView style={styles.profileContainer}>
       <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
       
       <View style={styles.profileHeader}>
-        <Text style={styles.profileHeaderTitle}>Profile</Text>
-        <TouchableOpacity 
-          style={styles.settingsButton}
-          onPress={toggleSettingsModal}
-        >
-          <Ionicons name="settings-outline" size={24} color="#212121" />
-        </TouchableOpacity>
+        {/* Add back button when viewing other profiles */}
+        {!isOwnProfile && (
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#212121" />
+          </TouchableOpacity>
+        )}
+        
+        <Text style={styles.profileHeaderTitle}>
+          {isOwnProfile ? 'Profile' : (viewingUserProfile?.username || 'User Profile')}
+        </Text>
+        
+        {/* Only show settings when viewing own profile */}
+        {isOwnProfile && (
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={toggleSettingsModal}
+          >
+            <Ionicons name="settings-outline" size={24} color="#212121" />
+          </TouchableOpacity>
+        )}
       </View>
       
-      {/* Settings Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={showSettingsModal}
-        onRequestClose={toggleSettingsModal}
-      >
-        <TouchableOpacity 
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={toggleSettingsModal}
+      {/* Only show settings modal on own profile */}
+      {isOwnProfile && (
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={showSettingsModal}
+          onRequestClose={toggleSettingsModal}
         >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Settings</Text>
-              
-              <TouchableOpacity 
-                style={styles.settingsOption}
-                onPress={() => {
-                  toggleSettingsModal();
-                  navigateToEditProfile();
-                }}
-              >
-                <Ionicons name="person-outline" size={22} color="#333" />
-                <Text style={styles.settingsOptionText}>Edit Profile</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.settingsOption}
-                onPress={() => {
-                  toggleSettingsModal();
-                  navigateToChangePassword();
-                }}
-              >
-                <Ionicons name="key-outline" size={22} color="#333" />
-                <Text style={styles.settingsOptionText}>Change Password</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.settingsOption, styles.signOutOption]}
-                onPress={() => {
-                  toggleSettingsModal();
-                  signOut();
-                }}
-              >
-                <Ionicons name="log-out-outline" size={22} color="#F44336" />
-                <Text style={[styles.settingsOptionText, styles.signOutText]}>Sign Out</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.closeButton}
-                onPress={toggleSettingsModal}
-              >
-                <Text style={styles.closeButtonText}>Cancel</Text>
-              </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={toggleSettingsModal}
+          >
+            <View style={styles.modalContainer}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Settings</Text>
+                
+                <TouchableOpacity 
+                  style={styles.settingsOption}
+                  onPress={() => {
+                    toggleSettingsModal();
+                    navigateToEditProfile();
+                  }}
+                >
+                  <Ionicons name="person-outline" size={22} color="#333" />
+                  <Text style={styles.settingsOptionText}>Edit Profile</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.settingsOption}
+                  onPress={() => {
+                    toggleSettingsModal();
+                    navigateToChangePassword();
+                  }}
+                >
+                  <Ionicons name="key-outline" size={22} color="#333" />
+                  <Text style={styles.settingsOptionText}>Change Password</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.settingsOption, styles.signOutOption]}
+                  onPress={() => {
+                    toggleSettingsModal();
+                    signOut();
+                  }}
+                >
+                  <Ionicons name="log-out-outline" size={22} color="#F44336" />
+                  <Text style={[styles.settingsOptionText, styles.signOutText]}>Sign Out</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.closeButton}
+                  onPress={toggleSettingsModal}
+                >
+                  <Text style={styles.closeButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+          </TouchableOpacity>
+        </Modal>
+      )}
       
       {/* Media Viewer Modal */}
       <MediaViewerModal />
+      
+      {/* Comments Modal */}
+      <CommentsModal />
       
       <ScrollView 
         style={styles.profileScrollView}
@@ -729,75 +1173,104 @@ function ProfileScreen({ user, profile, signOut, navigation }) {
           ) : (
             <View style={styles.profileAvatar}>
               <Text style={styles.profileAvatarText}>
-                {profile?.username ? profile.username.charAt(0).toUpperCase() : user?.email.charAt(0).toUpperCase()}
+                {isOwnProfile 
+                  ? (profile?.username ? profile.username.charAt(0).toUpperCase() : user?.email.charAt(0).toUpperCase())
+                  : (viewingUserProfile?.username ? viewingUserProfile.username.charAt(0).toUpperCase() : 'U')
+                }
               </Text>
             </View>
           )}
           
-          <Text style={styles.profileUsername}>{profile?.username || "Username Not Set"}</Text>
-          <Text style={styles.profileEmail}>{user?.email}</Text>
+          <Text style={styles.profileUsername}>
+            {isOwnProfile 
+              ? (profile?.username || "Username Not Set") 
+              : (viewingUserProfile?.username || "Username Not Available")
+            }
+          </Text>
+          
+          <Text style={styles.profileEmail}>
+            {isOwnProfile ? user?.email : ''}
+          </Text>
           
           {/* Bio section */}
           <View style={styles.bioContainer}>
-            <Text style={styles.bioTitle}>About Me</Text>
+            <Text style={styles.bioTitle}>About {isOwnProfile ? 'Me' : 'User'}</Text>
             <Text style={styles.bioText}>{bio}</Text>
           </View>
           
+          {/* Stats section - simplified for other users */}
           <View style={styles.profileStats}>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{hikeRecords.length}</Text>
               <Text style={styles.statLabel}>Activities</Text>
             </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>0</Text>
-              <Text style={styles.statLabel}>Reviews</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>0</Text>
-              <Text style={styles.statLabel}>Favorites</Text>
-            </View>
+            {isOwnProfile && (
+              <>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>0</Text>
+                  <Text style={styles.statLabel}>Reviews</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>0</Text>
+                  <Text style={styles.statLabel}>Favorites</Text>
+                </View>
+              </>
+            )}
           </View>
         </View>
         
         {/* Activity History Section */}
         <View style={styles.activityHistorySection}>
           <View style={styles.activitySectionHeader}>
-            <Text style={styles.activitySectionTitle}>Activity History</Text>
-            <TouchableOpacity 
-              style={styles.viewAllButton}
-              onPress={() => navigation.navigate('HikeHistory')}
-            >
-              <Text style={styles.viewAllText}>View All</Text>
-            </TouchableOpacity>
+            <Text style={styles.activitySectionTitle}>
+              {isOwnProfile ? 'Activity History' : 'Recent Activities'}
+            </Text>
+            {isOwnProfile && (
+              <TouchableOpacity 
+                style={styles.viewAllButton}
+                onPress={() => navigation.navigate('HikeHistory')}
+              >
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            )}
           </View>
           
           {loading ? (
             <ActivityIndicator size="large" color="#2E7D32" style={{padding: 20}} />
           ) : hikeRecords.length > 0 ? (
-            hikeRecords.map(hike => (
+            hikeRecords.map((hike, index) => (
               <HikeHistoryItem 
-                key={hike.id}
+                key={`hike-${hike.id || index}`} // Use a combination of id and index to guarantee uniqueness
                 hike={hike}
                 onPress={() => navigation.navigate('HikeDetail', { hikeId: hike.id })}
                 onMediaPress={handleMediaPress}
                 onLike={toggleLike}
-                onComment={navigateToComments}
+                onComment={openComments}
+                isOwnProfile={isOwnProfile}
               />
             ))
           ) : (
             <View style={styles.emptyActivitiesContainer}>
               <Ionicons name="footsteps-outline" size={60} color="#DDD" />
-              <Text style={styles.emptyActivitiesTitle}>No Activities Yet</Text>
+              <Text style={styles.emptyActivitiesTitle}>No Activities {isOwnProfile ? 'Yet' : 'Found'}</Text>
               <Text style={styles.emptyActivitiesText}>
-                Start tracking to record your hiking adventures.
+                {isOwnProfile 
+                  ? 'Start tracking to record your hiking adventures.'
+                  : 'This user has not shared any activities yet.'
+                }
               </Text>
-              <TouchableOpacity
-                style={styles.startTrackingButton}
-                onPress={() => navigation.navigate('Track')}
-              >
-                <Text style={styles.startTrackingText}>Start Tracking</Text>
-                <Ionicons name="arrow-forward" size={16} color="white" />
-              </TouchableOpacity>
+              {isOwnProfile && (
+                <TouchableOpacity
+                  style={styles.startTrackingButton}
+                  onPress={() => {
+                    // Simple tab navigation - this should work for direct tab screens
+                    navigation.navigate('Track');
+                  }}
+                >
+                  <Text style={styles.startTrackingText}>Start Tracking</Text>
+                  <Ionicons name="arrow-forward" size={16} color="white" />
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
@@ -849,6 +1322,11 @@ export default function HomeScreen({ navigation }) {
       alert(error.message)
     }
   }
+
+  // Navigation to view other user profiles
+  const navigateToUserProfile = (userId) => {
+    navigation.navigate('Profile', { userId });
+  };
 
   if (loading) {
     return (
@@ -1638,4 +2116,202 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#D32F2F',
   },
+  
+  // Add new styles for comments
+  commentModalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  commentModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  commentBackButton: {
+    padding: 8,
+  },
+  commentModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginLeft: 16,
+    color: '#212121',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  commentContent: {
+    flex: 1,
+  },
+  commentsList: {
+    padding: 16,
+  },
+  commentItem: {
+    backgroundColor: '#F9F9F9',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  commentUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  commentAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#2E7D32',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  commentAvatarText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  commentUsername: {
+    fontWeight: '600',
+    fontSize: 14,
+    color: '#212121',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  commentTime: {
+    fontSize: 12,
+    color: '#9E9E9E',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  commentText: {
+    fontSize: 15,
+    color: '#212121',
+    lineHeight: 22,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  addCommentContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    backgroundColor: '#FFFFFF',
+  },
+  commentInput: {
+    flex: 1,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    maxHeight: 100,
+    fontSize: 15,
+    color: '#212121',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  postCommentButton: {
+    backgroundColor: '#2E7D32',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  disabledButton: {
+    backgroundColor: '#C8E6C9',
+  },
+  emptyCommentsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 30,
+  },
+  emptyCommentsText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#212121',
+    marginTop: 16,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  emptyCommentsSubtext: {
+    fontSize: 15,
+    color: '#9E9E9E',
+    marginTop: 8,
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  backButton: {
+    position: 'absolute',
+    left: 20,
+    padding: 8,
+  },
+  
+  // New styles for the activity list view
+  activityListItem: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 15,
+    marginHorizontal: 15,
+    marginTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+    borderWidth: 1,
+    borderColor: '#F5F5F5',
+  },
+  activityListHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  activityListTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  activityListDate: {
+    fontSize: 14,
+    color: '#666',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  activityListStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+   },
+  activityListStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activityListStatValue: {
+    fontSize: 14,
+    color: '#333',
+    marginLeft: 5,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  activityListEngagement: {
+    flexDirection: 'row',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  activityListAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 20,
+  },
+  activityListActionText: {
+    fontSize: 14,
+    color: '#757575',
+    marginLeft: 4,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  }
 })

@@ -5,7 +5,8 @@ import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { formatDuration, formatPace, formatDistance } from '../utils/formatters';
 import NetInfo from '@react-native-community/netinfo';
-import { saveHikeToLocalDB, syncUnsentHikes, getAllHikes } from '../services/databaseService';
+import { saveHikeToLocalDB, syncUnsentHikes, getAllHikes, getCurrentUserId } from '../services/databaseService';
+import { isUserLoggedIn } from '../utils/supabase';
 import HikeStats from '../components/HikeStats';
 
 export default function TrackingScreen({ navigation }) {
@@ -22,6 +23,8 @@ export default function TrackingScreen({ navigation }) {
   });
   const [saveModalVisible, setSaveModalVisible] = useState(false);
   const [isConnected, setIsConnected] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('checking'); // 'ready', 'local-only', 'offline', 'checking'
   
   const mapRef = useRef(null)
   const locationSubscription = useRef(null)
@@ -79,12 +82,16 @@ export default function TrackingScreen({ navigation }) {
     // Subscribe to network state updates
     const unsubscribe = NetInfo.addEventListener(state => {
       setIsConnected(state.isConnected);
+      updateSyncStatus(state.isConnected);
     });
     
     // Check initial connection status
     NetInfo.fetch().then(state => {
       setIsConnected(state.isConnected);
     });
+    
+    // Check login status
+    checkLoginStatus();
     
     // Cleanup
     return () => {
@@ -97,6 +104,30 @@ export default function TrackingScreen({ navigation }) {
       unsubscribe(); // Unsubscribe from network state updates
     }
   }, []);
+  
+  // Check if user is logged in
+  const checkLoginStatus = async () => {
+    try {
+      const loggedIn = await isUserLoggedIn();
+      setIsLoggedIn(loggedIn);
+      updateSyncStatus(isConnected, loggedIn);
+    } catch (error) {
+      console.error('Error checking login status:', error);
+      setIsLoggedIn(false);
+      updateSyncStatus(isConnected, false);
+    }
+  };
+  
+  // Update sync status based on connection and login
+  const updateSyncStatus = (connected, loggedIn = isLoggedIn) => {
+    if (!connected) {
+      setSyncStatus('offline');
+    } else if (!loggedIn) {
+      setSyncStatus('local-only');
+    } else {
+      setSyncStatus('ready');
+    }
+  };
 
   const startTracking = async () => {
     try {
@@ -317,7 +348,7 @@ export default function TrackingScreen({ navigation }) {
     setSaveModalVisible(true);
   };
 
-  // Modify the handleSaveHike function
+  // Modify the handleSaveHike function to ensure coordinates are properly formatted
   const handleSaveHike = async () => {
     try {
       // Make validation less restrictive - allow saving even with minimal data
@@ -327,16 +358,42 @@ export default function TrackingScreen({ navigation }) {
         return;
       }
       
-      // Navigate to the SaveActivityScreen with current hike data
+      // Ensure route coordinates are in the correct format for map display
+      const sanitizedCoordinates = routeCoordinates.map(coord => ({
+        latitude: Number(coord.latitude),
+        longitude: Number(coord.longitude)
+      })).filter(coord => 
+        !isNaN(coord.latitude) && 
+        !isNaN(coord.longitude) && 
+        Math.abs(coord.latitude) <= 90 && 
+        Math.abs(coord.longitude) <= 180
+      );
+      
+      console.log(`Saving activity with ${sanitizedCoordinates.length} valid coordinates`);
+      
+      if (sanitizedCoordinates.length < 2) {
+        console.warn('Warning: Less than 2 valid coordinates for this activity');
+      }
+      
+      // Log the first and last coordinates for debugging
+      if (sanitizedCoordinates.length > 0) {
+        console.log('First coordinate:', JSON.stringify(sanitizedCoordinates[0]));
+        if (sanitizedCoordinates.length > 1) {
+          console.log('Last coordinate:', JSON.stringify(sanitizedCoordinates[sanitizedCoordinates.length - 1]));
+        }
+      }
+      
+      // Navigate to the SaveActivityScreen with sanitized route coordinates
       navigation.navigate('SaveActivity', {
-        routeCoordinates, // Make sure this is being passed!
+        routeCoordinates: sanitizedCoordinates,
         stats: {
           distance: stats.distance || 0,
           duration: stats.duration || 0,
           pace: stats.pace || 0,
           elevation: stats.elevation || 0
         },
-        date: new Date().toISOString()
+        date: new Date().toISOString(),
+        syncReady: syncStatus === 'ready'
       });
       
       // Close the modal
@@ -396,6 +453,43 @@ export default function TrackingScreen({ navigation }) {
         <HikeStats stats={stats} />
       </View>
     );
+  };
+
+  // Render sync status indicator in the modal
+  const renderSyncStatus = () => {
+    if (syncStatus === 'checking') {
+      return (
+        <View style={styles.syncStatusContainer}>
+          <MaterialIcons name="sync" size={20} color="#757575" />
+          <Text style={styles.syncStatusText}>Checking sync status...</Text>
+        </View>
+      );
+    } else if (syncStatus === 'ready') {
+      return (
+        <View style={styles.syncStatusContainer}>
+          <MaterialIcons name="cloud-done" size={20} color="#2E7D32" />
+          <Text style={[styles.syncStatusText, { color: '#2E7D32' }]}>Will be synced to cloud</Text>
+        </View>
+      );
+    } else if (syncStatus === 'local-only') {
+      return (
+        <View style={styles.syncStatusContainer}>
+          <MaterialIcons name="save" size={20} color="#FFA000" />
+          <Text style={[styles.syncStatusText, { color: '#FFA000' }]}>
+            Saved locally only (not logged in)
+          </Text>
+        </View>
+      );
+    } else { // offline
+      return (
+        <View style={styles.syncStatusContainer}>
+          <MaterialIcons name="cloud-off" size={20} color="#F44336" />
+          <Text style={[styles.syncStatusText, { color: '#F44336' }]}>
+            Saved locally only (offline)
+          </Text>
+        </View>
+      );
+    }
   };
 
   return (
@@ -622,6 +716,9 @@ export default function TrackingScreen({ navigation }) {
               </View>
             </View>
             
+            {/* Add sync status indicator */}
+            {renderSyncStatus()}
+            
             <View style={styles.modalButtonsContainer}>
               <TouchableOpacity 
                 style={[styles.modalButton, styles.discardButton]}
@@ -682,6 +779,12 @@ export default function TrackingScreen({ navigation }) {
       {!isConnected && (
         <View style={styles.offlineIndicator}>
           <Text style={styles.offlineText}>Offline Mode</Text>
+        </View>
+      )}
+      
+      {isConnected && !isLoggedIn && (
+        <View style={[styles.offlineIndicator, styles.localOnlyIndicator]}>
+          <Text style={styles.offlineText}>Local Only</Text>
         </View>
       )}
     </SafeAreaView>
@@ -1033,5 +1136,26 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     color: '#2E7D32',
+  },
+  
+  // Add new styles for sync status
+  syncStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E5E0',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E5E0',
+  },
+  syncStatusText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#757575',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+  localOnlyIndicator: {
+    backgroundColor: 'rgba(255, 160, 0, 0.9)', // Amber with transparency
   },
 })

@@ -25,6 +25,7 @@ import MediaViewerScreen from './screens/MediaViewerScreen';
 import SaveActivityScreen from './screens/SaveActivityScreen';
 import HikeDetailScreen from './screens/HikeDetailScreen';
 import ActivityCommentsScreen from './screens/ActivityCommentsScreen';
+import SaveConfirmationScreen from './screens/SaveConfirmationScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -216,6 +217,7 @@ export default function App() {
               options={{ headerShown: false }}
             />
             <Stack.Screen name="ActivityComments" component={ActivityCommentsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="SaveConfirmation" component={SaveConfirmationScreen} options={{ headerShown: false }} />
           </>
         ) : (
           <>

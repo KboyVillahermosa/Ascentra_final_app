@@ -17,14 +17,22 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatDate, formatDistance, formatDuration, formatPace } from '../utils/formatters';
-import { getAllHikes, debugStorage, deleteHike } from '../services/databaseService';
+import { 
+  getAllHikes, 
+  debugStorage, 
+  deleteHike, 
+  syncAllHikesToSupabase, 
+  syncHikeToSupabase, 
+  getCurrentUserId 
+} from '../services/databaseService';
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
+import NetInfo from '@react-native-community/netinfo';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width - 32; // Account for margins and padding
 
 // Custom HikeHistoryItem component with map
-const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress }) => {
+const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPress }) => {
   // Check if the hike has media files and route coordinates
   const hasMedia = hike.media && Array.isArray(hike.media) && hike.media.length > 0;
   const hasRoute = hike.routeCoordinates && Array.isArray(hike.routeCoordinates) && hike.routeCoordinates.length > 1;
@@ -138,6 +146,20 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress }) => {
             {hike.activityType || 'Hiking'}
           </Text>
         </View>
+        
+        {/* Sync status indicator */}
+        {hike.synced ? (
+          <View style={styles.syncedBadge}>
+            <Ionicons name="cloud-done" size={16} color="white" />
+          </View>
+        ) : (
+          <TouchableOpacity 
+            style={styles.notSyncedBadge}
+            onPress={() => onSyncPress(hike.id)}
+          >
+            <Ionicons name="cloud-upload" size={16} color="white" />
+          </TouchableOpacity>
+        )}
         
         <TouchableOpacity 
           style={styles.optionsButton}
@@ -270,6 +292,9 @@ export default function HikeHistoryScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedHikeId, setSelectedHikeId] = useState(null);
+  const [isOnline, setIsOnline] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   
   // New state for media viewer
   const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
@@ -279,13 +304,33 @@ export default function HikeHistoryScreen({ navigation }) {
   useEffect(() => {
     fetchHikeRecords();
     
+    // Check network status
+    const unsubscribeNet = NetInfo.addEventListener(state => {
+      setIsOnline(state.isConnected);
+    });
+    
+    // Check login status
+    const checkLoginStatus = async () => {
+      try {
+        const userId = await getCurrentUserId();
+        setIsLoggedIn(userId !== 'guest');
+      } catch (error) {
+        console.error('Error checking login status:', error);
+        setIsLoggedIn(false);
+      }
+    };
+    
+    checkLoginStatus();
+    
     // Refresh when the screen comes into focus
-    const unsubscribe = navigation.addListener('focus', () => {
+    const unsubscribeNav = navigation.addListener('focus', () => {
       fetchHikeRecords();
+      checkLoginStatus();
     });
     
     return () => {
-      unsubscribe();
+      unsubscribeNav();
+      unsubscribeNet();
     }
   }, [navigation]);
 
@@ -422,6 +467,79 @@ export default function HikeHistoryScreen({ navigation }) {
     }
   };
 
+  // Handle sync all hikes
+  const handleSyncAll = async () => {
+    if (!isOnline) {
+      Alert.alert('Offline', 'You need to be online to sync your hikes.');
+      return;
+    }
+    
+    if (!isLoggedIn) {
+      Alert.alert('Not Logged In', 'Please log in to sync your hikes across devices.');
+      return;
+    }
+    
+    try {
+      setIsSyncing(true);
+      const result = await syncAllHikesToSupabase();
+      
+      if (result.success) {
+        Alert.alert('Sync Complete', `Successfully synced ${result.synced} of ${result.total} hikes to the cloud.`);
+        // Refresh data
+        await fetchHikeRecords();
+      } else {
+        Alert.alert('Sync Error', result.error || 'Failed to sync hikes. Please try again.');
+      }
+    } catch (error) {
+      console.error('Sync error:', error);
+      Alert.alert('Sync Error', 'An unexpected error occurred. Please try again.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+  
+  // Handle sync individual hike
+  const handleSyncHike = async (hikeId) => {
+    if (!isOnline) {
+      Alert.alert('Offline', 'You need to be online to sync your hikes.');
+      return;
+    }
+    
+    if (!isLoggedIn) {
+      Alert.alert('Not Logged In', 'Please log in to sync your hikes across devices.');
+      return;
+    }
+    
+    try {
+      // Find the hike
+      const hikeToSync = hikeRecords.find(h => h.id === hikeId);
+      if (!hikeToSync) {
+        Alert.alert('Error', 'Hike not found');
+        return;
+      }
+      
+      // Get user ID
+      const userId = await getCurrentUserId();
+      
+      // Sync to Supabase
+      await syncHikeToSupabase(hikeToSync, userId);
+      
+      // Update local state
+      const updatedHikes = hikeRecords.map(h => {
+        if (h.id === hikeId) {
+          return { ...h, synced: true };
+        }
+        return h;
+      });
+      
+      setHikeRecords(updatedHikes);
+      Alert.alert('Success', 'Hike synced to cloud successfully');
+    } catch (error) {
+      console.error('Error syncing hike:', error);
+      Alert.alert('Error', 'Failed to sync hike. Please try again.');
+    }
+  };
+
   const renderEmptyState = () => {
     if (loading) {
       return (
@@ -457,6 +575,7 @@ export default function HikeHistoryScreen({ navigation }) {
         onPress={() => navigation.navigate('HikeDetail', { hikeId: item.id })}
         onMediaPress={handleMediaPress}
         onOptionsPress={() => handleOptionsPress(item.id)}
+        onSyncPress={handleSyncHike}
       />
     </View>
   );
@@ -472,11 +591,47 @@ export default function HikeHistoryScreen({ navigation }) {
         >
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
+        
         <Text style={styles.headerTitle}>Activity History</Text>
+        
+        {isLoggedIn && (
+          <TouchableOpacity 
+            style={styles.syncButton}
+            onPress={handleSyncAll}
+            disabled={isSyncing || !isOnline}
+          >
+            {isSyncing ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Ionicons name="cloud-upload" size={22} color="white" />
+            )}
+          </TouchableOpacity>
+        )}
+        
         <TouchableOpacity style={styles.filterButton}>
           <Ionicons name="funnel" size={22} color="white" />
         </TouchableOpacity>
       </View>
+      
+      {/* Offline indicator */}
+      {!isOnline && (
+        <View style={styles.offlineBar}>
+          <Ionicons name="cloud-offline" size={16} color="white" />
+          <Text style={styles.offlineText}>You are offline</Text>
+        </View>
+      )}
+      
+      {/* Login reminder */}
+      {!isLoggedIn && hikeRecords.length > 0 && (
+        <TouchableOpacity 
+          style={styles.loginReminderBar}
+          onPress={() => navigation.navigate('Profile')}
+        >
+          <Ionicons name="log-in" size={16} color="white" />
+          <Text style={styles.loginReminderText}>Log in to sync your activities across devices</Text>
+          <Ionicons name="chevron-forward" size={16} color="white" />
+        </TouchableOpacity>
+      )}
       
       <FlatList
         data={hikeRecords}
@@ -892,5 +1047,56 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#D32F2F',
+  },
+  syncedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#388E3C',
+    borderRadius: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginRight: 8,
+  },
+  notSyncedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFA000',
+    borderRadius: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginRight: 8,
+  },
+  syncButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  offlineBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF9800',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  offlineText: {
+    color: 'white',
+    fontSize: 14,
+    marginLeft: 8,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  loginReminderBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#2196F3',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  loginReminderText: {
+    flex: 1,
+    color: 'white',
+    fontSize: 14,
+    marginLeft: 8,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
 });

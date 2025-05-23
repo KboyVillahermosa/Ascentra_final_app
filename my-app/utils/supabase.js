@@ -1,5 +1,6 @@
 import 'react-native-url-polyfill/auto'
 import { createClient } from '@supabase/supabase-js'
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store'
 import * as FileSystem from 'expo-file-system'
 
@@ -16,9 +17,9 @@ const ExpoSecureStoreAdapter = {
   },
 }
 
-// Export these variables so they're accessible elsewhere
-export const supabaseUrl = 'https://rtiiyfvvfwtozmbedazb.supabase.co'
-export const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0aWl5ZnZ2Znd0b3ptYmVkYXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUzOTI5MTEsImV4cCI6MjA2MDk2ODkxMX0.HS-bjg7Ov4NXSA5KTOs12kahneLdRUOpxtzaf498jwI'
+// Replace these with your actual Supabase credentials from your dashboard
+const supabaseUrl = 'https://rtiiyfvvfwtozmbedazb.supabase.co'  // ⚠️ UPDATE THIS with your Supabase URL
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0aWl5ZnZ2Znd0b3ptYmVkYXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUzOTI5MTEsImV4cCI6MjA2MDk2ODkxMX0.HS-bjg7Ov4NXSA5KTOs12kahneLdRUOpxtzaf498jwI'  // ⚠️ UPDATE THIS with your Supabase anon key
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -27,7 +28,39 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: false,
   },
+  debug: __DEV__,  // Enable debug logging in development
 })
+
+// Utility function to check authentication status
+export const isUserLoggedIn = async () => {
+  try {
+    // Get current session
+    const { data, error } = await supabase.auth.getSession();
+    
+    if (error) {
+      console.error('Error checking login status:', error.message);
+      return false;
+    }
+    
+    // Log session data in development for debugging
+    if (__DEV__) {
+      console.log('Auth session data:', 
+        data?.session 
+          ? { 
+              user_id: data.session.user.id,
+              email: data.session.user.email,
+              expires_at: new Date(data.session.expires_at * 1000).toISOString() 
+            } 
+          : 'No active session'
+      );
+    }
+    
+    return !!data?.session?.user?.id;
+  } catch (error) {
+    console.error('Error in isUserLoggedIn:', error);
+    return false;
+  }
+};
 
 // Improved upload function with auth token handling
 export async function uploadFileToSupabase(bucketName, filePath, uri, contentType, maxRetries = 3) {

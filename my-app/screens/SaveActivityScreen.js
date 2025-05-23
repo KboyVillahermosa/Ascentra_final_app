@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,15 +13,18 @@ import {
   Image,
   FlatList,
   Alert,
-  Modal
+  Modal,
+  ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { saveHikeToLocalDB } from '../services/databaseService';
+import { saveHikeToLocalDB, getCurrentUserId, syncHikeToSupabase } from '../services/databaseService';
+import { supabase, isUserLoggedIn } from '../utils/supabase';
+import NetInfo from '@react-native-community/netinfo';
 
 export default function SaveActivityScreen({ navigation, route }) {
   // Get hike data from route params
-  const { routeCoordinates, stats, date } = route.params;
+  const { routeCoordinates, stats, date, syncReady } = route.params;
 
   // Form state
   const [title, setTitle] = useState('');
@@ -36,6 +39,15 @@ export default function SaveActivityScreen({ navigation, route }) {
   const [activityTypeModalVisible, setActivityTypeModalVisible] = useState(false);
   const [feelingModalVisible, setFeelingModalVisible] = useState(false);
   
+  // Add state for tracking connection and sync status
+  const [isConnected, setIsConnected] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('pending'); // 'pending', 'synced', 'local-only', 'failed'
+
+  // Debug state
+  const [debugInfo, setDebugInfo] = useState('');
+  const [showDebug, setShowDebug] = useState(false);
+
   // Activity type options
   const activityTypes = [
     { icon: 'footsteps', name: 'Hiking' },
@@ -98,10 +110,131 @@ export default function SaveActivityScreen({ navigation, route }) {
     setMediaFiles(updatedMedia);
   };
 
-  // Handle save activity
+  // Check network connection and login status
+  useEffect(() => {
+    // Subscribe to network state updates
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsConnected(state.isConnected);
+    });
+
+    // Check if user is logged in - improved version
+    const checkLoginStatus = async () => {
+      try {
+        // Try the improved isUserLoggedIn utility first
+        const loggedIn = await isUserLoggedIn();
+        setIsLoggedIn(loggedIn);
+        
+        if (loggedIn) {
+          setDebugInfo(prev => `User is logged in\n${prev}`);
+        } else {
+          // Double-check with getCurrentUserId
+          const userId = await getCurrentUserId();
+          const isNotGuest = userId !== 'guest';
+          setIsLoggedIn(isNotGuest);
+          
+          setDebugInfo(prev => `User ID check: ${userId} (${isNotGuest ? 'logged in' : 'guest'})\n${prev}`);
+        }
+      } catch (error) {
+        console.error('Error checking login status:', error);
+        setIsLoggedIn(false);
+        setDebugInfo(prev => `Login check error: ${error.message}\n${prev}`);
+      }
+    };
+
+    checkLoginStatus();
+
+    // Cleanup subscription
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Set initial sync status based on what TrackingScreen determined
+  useEffect(() => {
+    if (typeof syncReady === 'boolean') {
+      setSyncStatus(syncReady ? 'pending' : 'local-only');
+    }
+  }, [syncReady]);
+
+  // Advanced debug function - enhanced version
+  const checkSupabaseConnection = async () => {
+    try {
+      setDebugInfo('Checking Supabase connection...\n');
+      
+      // Test Supabase connection by listing tables
+      const { data: tablesData, error: tablesError } = await supabase
+        .rpc('get_tables');
+      
+      if (tablesError) {
+        setDebugInfo(prev => prev + `Tables error: ${tablesError.message}\n`);
+        
+        // Try a simple endpoint just to check connectivity
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          setDebugInfo(prev => prev + `Connection error: ${error.message}\n`);
+          return false;
+        } else {
+          setDebugInfo(prev => prev + `Base connection OK, but table query failed\n`);
+        }
+      } else {
+        // Check if saveactivity table exists
+        const tables = tablesData || [];
+        const hasActivityTable = tables.some(t => t === 'saveactivity');
+        setDebugInfo(prev => prev + `Tables: ${tables.join(', ')}\n`);
+        setDebugInfo(prev => prev + `saveactivity table exists: ${hasActivityTable}\n`);
+      }
+      
+      // Check auth status
+      const { data: authData, error: authError } = await supabase.auth.getSession();
+      
+      if (authError) {
+        setDebugInfo(prev => prev + `Auth error: ${authError.message}\n`);
+        return false;
+      }
+      
+      const isAuthenticated = !!authData?.session?.user;
+      
+      setDebugInfo(prev => prev + `User authenticated: ${isAuthenticated}\n`);
+      if (isAuthenticated) {
+        setDebugInfo(prev => prev + `User ID: ${authData.session.user.id}\n`);
+        setDebugInfo(prev => prev + `User email: ${authData.session.user.email}\n`);
+        setDebugInfo(prev => prev + `Session expires: ${new Date(authData.session.expires_at * 1000).toISOString()}\n`);
+      }
+      
+      // Try to directly access saveactivity table
+      try {
+        const { data: activityData, error: activityError } = await supabase
+          .from('saveactivity')
+          .select('count')
+          .limit(1);
+        
+        if (activityError) {
+          setDebugInfo(prev => prev + `Activity table error: ${activityError.message}\n`);
+        } else {
+          setDebugInfo(prev => prev + `Activity table connection OK\n`);
+        }
+      } catch (tableError) {
+        setDebugInfo(prev => prev + `Activity table exception: ${tableError.message}\n`);
+      }
+      
+      return isAuthenticated;
+    } catch (error) {
+      setDebugInfo(prev => prev + `Error: ${error.message}\n`);
+      return false;
+    }
+  };
+
+  // Handle save activity with improved error handling and diagnostics
   const handleSave = async () => {
     try {
       setSaving(true);
+      
+      // Use the syncStatus that was determined earlier
+      if (syncStatus === 'local-only') {
+        setDebugInfo('Activity will be saved locally only');
+      } else {
+        setDebugInfo('Attempting to sync with cloud');
+      }
       
       // Process media files to extract just the necessary data
       const processedMedia = mediaFiles.map(media => ({
@@ -111,9 +244,7 @@ export default function SaveActivityScreen({ navigation, route }) {
       }));
       
       console.log('Processed media files:', processedMedia.length, 'items');
-      processedMedia.forEach((item, i) => {
-        console.log(`Media #${i}: ${item.type} - ${item.uri}`);
-      });
+      setDebugInfo(prev => prev + `Processed ${processedMedia.length} media files\n`);
       
       // Prepare enriched hike data
       const hikeData = {
@@ -125,7 +256,6 @@ export default function SaveActivityScreen({ navigation, route }) {
         date: date || new Date().toISOString(),
         routeCoordinates,
         media: processedMedia,
-        synced: 1, // Mark as already synced
         stats: {
           distance: stats.distance || 0,
           duration: stats.duration || 0,
@@ -134,23 +264,93 @@ export default function SaveActivityScreen({ navigation, route }) {
         }
       };
       
-      console.log('Saving hike with enriched data:', {
-        title: hikeData.title,
-        date: hikeData.date,
-        distance: hikeData.stats.distance,
-        routePoints: hikeData.routeCoordinates.length,
-        mediaCount: hikeData.media.length
-      });
+      // Get user ID for direct Supabase sync
+      const userId = await getCurrentUserId();
+      setDebugInfo(prev => prev + `Current user ID: ${userId}\n`);
       
-      // Save to local storage
+      // Determine if we can sync now
+      const canSync = isConnected && isLoggedIn;
+      setDebugInfo(prev => prev + `Can sync? ${canSync} (connected: ${isConnected}, logged in: ${isLoggedIn})\n`);
+      
+      // Check Supabase connection
+      if (canSync) {
+        const connectionOk = await checkSupabaseConnection();
+        setDebugInfo(prev => prev + `Supabase check result: ${connectionOk}\n`);
+      }
+      
+      // Save locally first
+      setDebugInfo(prev => prev + 'Saving to local database...\n');
       const savedId = await saveHikeToLocalDB(hikeData);
-      console.log('Successfully saved hike with ID:', savedId);
+      setDebugInfo(prev => prev + `Local save successful, assigned ID: ${savedId}\n`);
       
-      // Navigate to history screen
-      navigation.replace('HikeHistory');
+      // Get the saved hike with its ID for manual sync
+      hikeData.id = savedId;
+      
+      // Try manual sync to Supabase if we're online and logged in
+      if (canSync && userId !== 'guest') {
+        try {
+          setDebugInfo(prev => prev + 'Attempting direct Supabase sync...\n');
+          
+          const syncResult = await syncHikeToSupabase(hikeData, userId);
+          setDebugInfo(prev => prev + `Direct sync result: ${syncResult ? 'Success' : 'Failed'}\n`);
+          
+          if (syncResult) {
+            setSyncStatus('synced');
+            console.log('Activity saved and manually synced to cloud');
+          } else {
+            setSyncStatus('failed');
+            console.log('Manual sync failed');
+          }
+        } catch (syncError) {
+          console.error('Manual sync error:', syncError);
+          setDebugInfo(prev => prev + `Manual sync error: ${syncError.message}\n`);
+          setSyncStatus('failed');
+        }
+      } else if (!isLoggedIn) {
+        setSyncStatus('local-only');
+        console.log('Activity saved locally only (not logged in)');
+      } else {
+        setSyncStatus('local-only');
+        console.log('Activity saved locally only (offline)');
+      }
+      
+      // Show appropriate message
+      setTimeout(() => {
+        if (syncStatus === 'synced') {
+          Alert.alert('Activity Saved', 'Your activity has been saved and synced to the cloud.');
+        } else if (!isLoggedIn) {
+          Alert.alert('Activity Saved Locally', 'Your activity has been saved locally. Log in to sync across devices.');
+        } else if (!isConnected) {
+          Alert.alert('Activity Saved Offline', 'Your activity has been saved locally and will sync when you reconnect.');
+        } else {
+          // Show debug option if sync failed
+          Alert.alert(
+            'Activity Saved With Issues', 
+            'Your activity was saved locally but we had trouble syncing to the cloud. Would you like to see more details?',
+            [
+              { text: 'No, continue', onPress: () => navigation.replace('HikeHistory') },
+              { text: 'Show details', onPress: () => setShowDebug(true) }
+            ]
+          );
+          return;
+        }
+        
+        // Navigate to history screen
+        navigation.replace('HikeHistory');
+      }, 1000);
+      
     } catch (error) {
       console.error('Failed to save activity:', error);
-      alert('Could not save your activity. Please try again.');
+      setDebugInfo(prev => prev + `Save error: ${error.message}\n${error.stack || ''}\n`);
+      setSyncStatus('failed');
+      Alert.alert(
+        'Save Error', 
+        'Could not save your activity. Would you like to see technical details?',
+        [
+          { text: 'No', style: 'cancel' },
+          { text: 'Show details', onPress: () => setShowDebug(true) }
+        ]
+      );
     } finally {
       setSaving(false);
     }
@@ -236,6 +436,56 @@ export default function SaveActivityScreen({ navigation, route }) {
     );
   };
 
+  // Render sync status indicator
+  const renderSyncStatus = () => {
+    if (syncStatus === 'pending') {
+      return null;
+    } else if (syncStatus === 'synced') {
+      return (
+        <View style={styles.syncStatusContainer}>
+          <Ionicons name="cloud-done" size={18} color="#2E7D32" />
+          <Text style={styles.syncStatusText}>Synced to cloud</Text>
+        </View>
+      );
+    } else if (syncStatus === 'local-only') {
+      return (
+        <View style={styles.syncStatusContainer}>
+          <Ionicons name="save" size={18} color="#FF9800" />
+          <Text style={[styles.syncStatusText, {color: '#FF9800'}]}>Saved locally</Text>
+        </View>
+      );
+    } else if (syncStatus === 'failed') {
+      return (
+        <View style={styles.syncStatusContainer}>
+          <Ionicons name="warning" size={18} color="#F44336" />
+          <Text style={[styles.syncStatusText, {color: '#F44336'}]}>Sync failed</Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
+  // Modify the header to show save button with loading state
+  const renderSaveButton = () => {
+    if (saving) {
+      return (
+        <View style={styles.saveButton}>
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        </View>
+      );
+    }
+    
+    return (
+      <TouchableOpacity
+        style={styles.saveButton}
+        onPress={handleSave}
+        disabled={saving}
+      >
+        <Text style={styles.saveButtonText}>SAVE</Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
@@ -250,14 +500,19 @@ export default function SaveActivityScreen({ navigation, route }) {
         
         <Text style={styles.headerTitle}>Save Activity</Text>
         
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={handleSave}
-          disabled={saving}
-        >
-          <Text style={styles.saveButtonText}>SAVE</Text>
-        </TouchableOpacity>
+        {renderSaveButton()}
       </View>
+      
+      {/* Connection status indicator */}
+      {!isConnected && (
+        <View style={styles.offlineBar}>
+          <Ionicons name="cloud-offline" size={16} color="white" />
+          <Text style={styles.offlineText}>You are offline</Text>
+        </View>
+      )}
+      
+      {/* Show sync status if available */}
+      {renderSyncStatus()}
       
       <KeyboardAvoidingView 
         style={styles.formContainer}
@@ -444,6 +699,50 @@ export default function SaveActivityScreen({ navigation, route }) {
                 </React.Fragment>
               ))}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Debug Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showDebug}
+        onRequestClose={() => setShowDebug(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, styles.debugModalContent]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Technical Details</Text>
+              <TouchableOpacity
+                onPress={() => setShowDebug(false)}
+              >
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.debugScrollView}>
+              <Text style={styles.debugText}>{debugInfo}</Text>
+            </ScrollView>
+            
+            <View style={styles.debugActions}>
+              <TouchableOpacity 
+                style={styles.debugButton}
+                onPress={() => checkSupabaseConnection()}
+              >
+                <Text style={styles.debugButtonText}>Test Connection</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.debugButton, styles.debugCloseButton]}
+                onPress={() => {
+                  setShowDebug(false);
+                  navigation.replace('HikeHistory');
+                }}
+              >
+                <Text style={styles.debugCloseButtonText}>Close & Continue</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -731,5 +1030,77 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#E0E5E0',
     marginVertical: 4,
+  },
+  // Add new styles for sync status
+  syncStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E8F5E9',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  syncStatusText: {
+    color: '#2E7D32',
+    fontSize: 14,
+    marginLeft: 8,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  offlineBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF9800',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  offlineText: {
+    color: 'white',
+    fontSize: 14,
+    marginLeft: 8,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  // Debug modal styles
+  debugModalContent: {
+    width: '90%',
+    height: '80%',
+  },
+  debugScrollView: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    padding: 10,
+    borderRadius: 4,
+  },
+  debugText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 12,
+    color: '#333',
+  },
+  debugActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  debugButton: {
+    backgroundColor: '#2E7D32',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  debugButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  debugCloseButton: {
+    backgroundColor: '#666',
+  },
+  debugCloseButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
