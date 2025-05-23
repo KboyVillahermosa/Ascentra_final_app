@@ -49,6 +49,18 @@ export default function ForumPost() {
   const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
   const [currentMediaList, setCurrentMediaList] = useState([]);
   
+  // New states for comments and likes
+  const [commentText, setCommentText] = useState('');
+  const [activeCommentPostId, setActiveCommentPostId] = useState(null);
+  const [commentingActive, setCommentingActive] = useState(false);
+  const [commentsVisible, setCommentsVisible] = useState({});
+  const [postComments, setPostComments] = useState({});
+  const [commentCounts, setCommentCounts] = useState({});
+  const [likeCounts, setLikeCounts] = useState({});
+  const [userLikedPosts, setUserLikedPosts] = useState({});
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [submittingLike, setSubmittingLike] = useState(false);
+  
   // Get current user on component mount
   useEffect(() => {
     getUser();
@@ -130,6 +142,71 @@ export default function ForumPost() {
           profilesMap[profile.id] = profile;
         });
       }
+      
+      // Fetch like counts for all posts
+      const { data: likeData, error: likeError } = await supabase
+        .from('forum_likes')
+        .select('post_id, id')
+        .in('post_id', postsData.map(post => post.id));
+        
+      if (likeError) {
+        console.error('Error fetching likes:', likeError);
+      }
+      
+      // Count likes by post
+      const likesByPost = {};
+      if (likeData) {
+        likeData.forEach(like => {
+          if (!likesByPost[like.post_id]) {
+            likesByPost[like.post_id] = 0;
+          }
+          likesByPost[like.post_id]++;
+        });
+      }
+      setLikeCounts(likesByPost);
+      
+      // Check which posts the current user has liked
+      if (user) {
+        const { data: userLikes, error: userLikesError } = await supabase
+          .from('forum_likes')
+          .select('post_id')
+          .eq('user_id', user.id)
+          .in('post_id', postsData.map(post => post.id));
+          
+        if (userLikesError) {
+          console.error('Error fetching user likes:', userLikesError);
+        }
+        
+        const userLikedPostsMap = {};
+        if (userLikes) {
+          userLikes.forEach(like => {
+            userLikedPostsMap[like.post_id] = true;
+          });
+        }
+        setUserLikedPosts(userLikedPostsMap);
+      }
+      
+      // Fetch comment counts for all posts
+      const { data: commentCountData, error: commentCountError } = await supabase
+        .from('forum_comments')
+        .select('post_id, id')
+        .in('post_id', postsData.map(post => post.id));
+        
+      if (commentCountError) {
+        console.error('Error fetching comment counts:', commentCountError);
+      }
+      
+      // Count comments by post
+      const commentsByPost = {};
+      if (commentCountData) {
+        commentCountData.forEach(comment => {
+          if (!commentsByPost[comment.post_id]) {
+            commentsByPost[comment.post_id] = 0;
+          }
+          commentsByPost[comment.post_id]++;
+        });
+      }
+      setCommentCounts(commentsByPost);
       
       // Attach profile data and media to each post
       const postsWithData = postsData.map(post => ({
@@ -763,6 +840,300 @@ export default function ForumPost() {
     );
   };
 
+  // Toggle like on post
+  const toggleLike = async (postId) => {
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to like posts');
+      return;
+    }
+    
+    if (submittingLike) return;
+    
+    try {
+      setSubmittingLike(true);
+      
+      if (userLikedPosts[postId]) {
+        // User already liked this post, so remove the like
+        const { error } = await supabase
+          .from('forum_likes')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', user.id);
+          
+        if (error) throw error;
+        
+        // Update local state
+        setUserLikedPosts(prev => {
+          const newState = { ...prev };
+          delete newState[postId];
+          return newState;
+        });
+        
+        setLikeCounts(prev => ({
+          ...prev,
+          [postId]: (prev[postId] || 1) - 1
+        }));
+      } else {
+        // User hasn't liked this post, so add a like
+        const { error } = await supabase
+          .from('forum_likes')
+          .insert({
+            post_id: postId,
+            user_id: user.id
+          });
+          
+        if (error) throw error;
+        
+        // Update local state
+        setUserLikedPosts(prev => ({
+          ...prev,
+          [postId]: true
+        }));
+        
+        setLikeCounts(prev => ({
+          ...prev,
+          [postId]: (prev[postId] || 0) + 1
+        }));
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      Alert.alert('Error', 'Failed to update like. Please try again.');
+    } finally {
+      setSubmittingLike(false);
+    }
+  };
+
+  // Fetch comments for a post
+  const fetchComments = async (postId) => {
+    try {
+      // Don't re-fetch if we already have comments and they're visible
+      if (postComments[postId] && commentsVisible[postId]) {
+        setCommentsVisible(prev => ({
+          ...prev,
+          [postId]: false
+        }));
+        return;
+      }
+      
+      // If we're toggling to show comments, but don't have them yet
+      if (!postComments[postId]) {
+        const { data, error } = await supabase
+          .from('forum_comments')
+          .select(`
+            id,
+            content,
+            created_at,
+            user_id
+          `)
+          .eq('post_id', postId)
+          .order('created_at', { ascending: true });
+          
+        if (error) throw error;
+        
+        // Get all unique commenter user IDs
+        const commenterIds = [...new Set(data.map(comment => comment.user_id))];
+        
+        // Get profile data for commenters
+        const { data: commenterProfiles, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url')
+          .in('id', commenterIds);
+          
+        if (profileError) {
+          console.error('Error fetching commenter profiles:', profileError);
+        }
+        
+        // Create a map of user IDs to profiles
+        const profileMap = {};
+        if (commenterProfiles) {
+          commenterProfiles.forEach(profile => {
+            profileMap[profile.id] = profile;
+          });
+        }
+        
+        // Attach profile data to comments
+        const commentsWithProfiles = data.map(comment => ({
+          ...comment,
+          profile: profileMap[comment.user_id] || null
+        }));
+        
+        // Update comments state
+        setPostComments(prev => ({
+          ...prev,
+          [postId]: commentsWithProfiles
+        }));
+      }
+      
+      // Toggle visibility
+      setCommentsVisible(prev => ({
+        ...prev,
+        [postId]: !prev[postId]
+      }));
+      
+      // Set active commenting post
+      setActiveCommentPostId(postId);
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+      Alert.alert('Error', 'Failed to load comments. Please try again.');
+    }
+  };
+
+  // Submit a new comment
+  const submitComment = async () => {
+    if (!commentText.trim() || !activeCommentPostId || !user) {
+      return;
+    }
+    
+    try {
+      setSubmittingComment(true);
+      
+      // Insert comment to database
+      const { data, error } = await supabase
+        .from('forum_comments')
+        .insert({
+          post_id: activeCommentPostId,
+          user_id: user.id,
+          content: commentText.trim()
+        })
+        .select('id, created_at')
+        .single();
+        
+      if (error) throw error;
+      
+      // Add the new comment to state
+      const newComment = {
+        id: data.id,
+        content: commentText.trim(),
+        user_id: user.id,
+        created_at: data.created_at,
+        profile: {
+          id: user.id,
+          username: user.email, // fallback to email if profile not loaded
+          avatar_url: null
+        }
+      };
+      
+      // If we have the user's profile, use it
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('username, avatar_url')
+        .eq('id', user.id)
+        .single();
+        
+      if (profileData) {
+        newComment.profile.username = profileData.username;
+        newComment.profile.avatar_url = profileData.avatar_url;
+      }
+      
+      // Update comments in state
+      setPostComments(prev => ({
+        ...prev,
+        [activeCommentPostId]: [...(prev[activeCommentPostId] || []), newComment]
+      }));
+      
+      // Update comment count
+      setCommentCounts(prev => ({
+        ...prev,
+        [activeCommentPostId]: (prev[activeCommentPostId] || 0) + 1
+      }));
+      
+      // Clear input
+      setCommentText('');
+      
+    } catch (error) {
+      console.error('Error submitting comment:', error);
+      Alert.alert('Error', 'Failed to post comment. Please try again.');
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  // Render a single comment
+  const renderComment = (comment) => {
+    const date = new Date(comment.created_at);
+    const formattedDate = date.toLocaleDateString() + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    return (
+      <View key={comment.id} style={styles.commentItem}>
+        <View style={styles.commentHeader}>
+          {comment.profile?.avatar_url ? (
+            <Image source={{ uri: comment.profile.avatar_url }} style={styles.commentAvatar} />
+          ) : (
+            <View style={styles.commentAvatarPlaceholder}>
+              <Text style={styles.commentAvatarText}>
+                {comment.profile?.username ? comment.profile.username.charAt(0).toUpperCase() : '?'}
+              </Text>
+            </View>
+          )}
+          
+          <View style={styles.commentInfo}>
+            <Text style={styles.commentUsername}>{comment.profile?.username || 'Anonymous'}</Text>
+            <Text style={styles.commentDate}>{formattedDate}</Text>
+          </View>
+        </View>
+        
+        <Text style={styles.commentContent}>{comment.content}</Text>
+      </View>
+    );
+  };
+
+  // Render comments section for a post
+  const renderCommentsSection = (postId) => {
+    if (!commentsVisible[postId]) {
+      return null;
+    }
+    
+    const comments = postComments[postId] || [];
+    
+    return (
+      <View style={styles.commentsContainer}>
+        <View style={styles.commentsDivider} />
+        
+        <View style={styles.commentsHeader}>
+          <Text style={styles.commentsTitle}>
+            Comments ({commentCounts[postId] || 0})
+          </Text>
+        </View>
+        
+        {comments.length === 0 ? (
+          <Text style={styles.noCommentsText}>
+            No comments yet. Be the first to share your thoughts!
+          </Text>
+        ) : (
+          <View style={styles.commentsList}>
+            {comments.map(renderComment)}
+          </View>
+        )}
+        
+        <View style={styles.commentInputContainer}>
+          <TextInput
+            style={styles.commentInput}
+            placeholder="Write a comment..."
+            value={commentText}
+            onChangeText={setCommentText}
+            multiline
+            maxLength={500}
+          />
+          
+          <TouchableOpacity 
+            style={[
+              styles.commentSubmitButton, 
+              (!commentText.trim() || submittingComment) && styles.commentSubmitButtonDisabled
+            ]} 
+            onPress={submitComment}
+            disabled={!commentText.trim() || submittingComment}
+          >
+            {submittingComment ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Ionicons name="send" size={18} color="#FFF" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   // Render a post item
   const renderPost = ({ item }) => {
     // Format date
@@ -772,6 +1143,11 @@ export default function ForumPost() {
     // Get username and avatar
     const username = item.profiles?.username || 'Anonymous';
     const avatarUrl = item.profiles?.avatar_url;
+    
+    // Get like and comment counts
+    const likeCount = likeCounts[item.id] || 0;
+    const commentCount = commentCounts[item.id] || 0;
+    const userLiked = userLikedPosts[item.id] || false;
     
     return (
       <View style={styles.postItem}>
@@ -796,15 +1172,56 @@ export default function ForumPost() {
         
         {renderPostMedia(item.media)}
         
+        <View style={styles.postActionStats}>
+          {likeCount > 0 && (
+            <View style={styles.statItem}>
+              <Ionicons name="heart" size={12} color="#FF3B30" />
+              <Text style={styles.statText}>{likeCount}</Text>
+            </View>
+          )}
+          
+          {commentCount > 0 && (
+            <TouchableOpacity 
+              style={styles.statItem} 
+              onPress={() => fetchComments(item.id)}
+            >
+              <Text style={styles.statText}>{commentCount} comments</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        
         <View style={styles.postActions}>
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="heart-outline" size={20} color="#666" />
-            <Text style={styles.actionText}>Like</Text>
+          <TouchableOpacity 
+            style={[styles.actionButton, userLiked && styles.actionButtonActive]}
+            onPress={() => toggleLike(item.id)}
+            disabled={submittingLike}
+          >
+            <Ionicons 
+              name={userLiked ? "heart" : "heart-outline"} 
+              size={20} 
+              color={userLiked ? "#FF3B30" : "#666"} 
+            />
+            <Text 
+              style={[styles.actionText, userLiked && styles.actionTextActive]}
+            >
+              {userLiked ? 'Liked' : 'Like'}
+            </Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="chatbubble-outline" size={20} color="#666" />
-            <Text style={styles.actionText}>Comment</Text>
+          <TouchableOpacity 
+            style={[styles.actionButton, commentsVisible[item.id] && styles.actionButtonActive]} 
+            onPress={() => fetchComments(item.id)}
+          >
+            <Ionicons 
+              name={commentsVisible[item.id] ? "chatbubble" : "chatbubble-outline"} 
+              size={20} 
+              color={commentsVisible[item.id] ? "#2E7D32" : "#666"} 
+            />
+            <Text 
+              style={[styles.actionText, commentsVisible[item.id] && styles.actionTextActive]}
+            >
+              Comment
+            </Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.actionButton}>
@@ -812,6 +1229,8 @@ export default function ForumPost() {
             <Text style={styles.actionText}>Share</Text>
           </TouchableOpacity>
         </View>
+        
+        {renderCommentsSection(item.id)}
       </View>
     );
   };
@@ -1197,6 +1616,21 @@ const styles = StyleSheet.create({
     left: 0,
     zIndex: 10,
   },
+  postActionStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    paddingBottom: 8,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statText: {
+    fontSize: 12,
+    color: '#757575',
+    marginLeft: 4,
+  },
   postActions: {
     flexDirection: 'row',
     borderTopWidth: 1,
@@ -1209,29 +1643,124 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 20,
     paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderRadius: 20,
+  },
+  actionButtonActive: {
+    backgroundColor: 'rgba(0,0,0,0.05)',
   },
   actionText: {
     marginLeft: 5,
     fontSize: 14,
     color: '#666',
   },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-    marginTop: 40,
+  actionTextActive: {
+    color: '#333',
+    fontWeight: '500',
   },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#757575',
-    marginTop: 15,
+  
+  // Comment section styles
+  commentsContainer: {
+    padding: 10,
+    backgroundColor: '#FAFAFA',
+    borderTopWidth: 1,
+    borderTopColor: '#EEEEEE',
   },
-  emptyText: {
-    fontSize: 14,
+  commentsDivider: {
+    height: 1,
+    backgroundColor: '#EEEEEE',
+    marginVertical: 5,
+  },
+  commentsHeader: {
+    paddingVertical: 10,
+  },
+  commentsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#424242',
+  },
+  noCommentsText: {
     color: '#9E9E9E',
-    marginTop: 5,
+    fontStyle: 'italic',
     textAlign: 'center',
+    marginVertical: 15,
+  },
+  commentsList: {
+    marginTop: 10,
+  },
+  commentItem: {
+    marginBottom: 15,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  commentAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  commentAvatarPlaceholder: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#2E7D32',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  commentAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  commentInfo: {
+    marginLeft: 8,
+  },
+  commentUsername: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#424242',
+  },
+  commentDate: {
+    fontSize: 11,
+    color: '#9E9E9E',
+  },
+  commentContent: {
+    fontSize: 14,
+    color: '#424242',
+    lineHeight: 20,
+    marginLeft: 38, // Align with username
+  },
+  commentInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 15,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    paddingRight: 5,
+  },
+  commentInput: {
+    flex: 1,
+    padding: 10,
+    maxHeight: 80,
+    fontSize: 14,
+  },
+  commentSubmitButton: {
+    backgroundColor: '#2E7D32',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  commentSubmitButtonDisabled: {
+    backgroundColor: '#CCCCCC',
   },
   
   // New and updated styles for responsive media grid
