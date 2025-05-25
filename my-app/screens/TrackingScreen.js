@@ -36,6 +36,9 @@ export default function TrackingScreen({ navigation }) {
   const prevCoordinatesRef = useRef([])
   const lastValidDistanceRef = useRef(0) // To prevent erroneous distance jumps
   const lastStatsRef = useRef({}) // Store stats at pause time
+  const paceReadingsRef = useRef([]);  // To store last 5 pace readings for smoothing
+
+  const MIN_SPEED_THRESHOLD = 0.5;     // Minimum speed in m/s to consider for pace calculation
 
   useEffect(() => {
     (async () => {
@@ -222,13 +225,35 @@ export default function TrackingScreen({ navigation }) {
               const newTotalDistance = lastValidDistanceRef.current;
               const newDuration = (new Date().getTime() - startTimeRef.current - pausedTimeRef.current) / 1000;
               
-              // Calculate pace (minutes per km)
-              const newPace = newTotalDistance > 0 ? (newDuration / 60) / (newTotalDistance / 1000) : 0;
-              
-              // Calculate elevation gain - only positive changes
-              const elevationChange = 
-                altitude && altitude > initialAltitudeRef.current ? 
-                altitude - initialAltitudeRef.current : 0;
+              // Calculate pace only if we have meaningful distance and duration
+              let newPace = 0;
+              if (newDistance > 50 && newDuration > 10) {  // Only calculate pace after 50m and 10 seconds
+                // Pace is minutes per km - higher number means slower pace
+                const rawPace = (newDuration / 60) / (newDistance / 1000);
+                
+                // Don't include extremely slow paces (likely standing still or very slow walking)
+                if (speed > MIN_SPEED_THRESHOLD) {
+                  // Add to rolling average if it's a reasonable value
+                  if (rawPace > 3 && rawPace < 30) {  // Between 3-30 min/km is reasonable
+                    paceReadingsRef.current.push(rawPace);
+                    // Keep only last 5 readings for smoothing
+                    if (paceReadingsRef.current.length > 5) {
+                      paceReadingsRef.current.shift();
+                    }
+                  }
+                }
+                
+                // Calculate average pace from readings
+                if (paceReadingsRef.current.length > 0) {
+                  const sum = paceReadingsRef.current.reduce((a, b) => a + b, 0);
+                  newPace = sum / paceReadingsRef.current.length;
+                } else {
+                  newPace = rawPace; // Use raw pace if we don't have readings yet
+                }
+                
+                // Cap extremely fast or slow paces to reasonable values
+                newPace = Math.max(3, Math.min(newPace, 30));
+              }
               
               const newStats = {
                 distance: newTotalDistance,
@@ -275,11 +300,12 @@ export default function TrackingScreen({ navigation }) {
       const elapsedSeconds = (currentTime - startTimeRef.current - pausedTimeRef.current) / 1000;
       
       setStats(prevStats => {
+        // Don't recalculate pace here - use the value from location tracking
+        // This avoids pace changes when standing still
         const newStats = {
           ...prevStats,
           duration: elapsedSeconds,
-          // Recalculate pace
-          pace: prevStats.distance > 0 ? (elapsedSeconds / 60) / (prevStats.distance / 1000) : 0
+          // Keep existing pace from location tracking
         };
         
         // Update the last stats reference
