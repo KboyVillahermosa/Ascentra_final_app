@@ -20,6 +20,7 @@ import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import { Video } from 'expo-av';
 import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 export default function PostsScreen({ navigation }) {
   const [posts, setPosts] = useState([]);
@@ -425,14 +426,28 @@ export default function PostsScreen({ navigation }) {
       style={styles.container}
     >
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
+        <LinearGradient
+          colors={['#2C5F2D', '#3A7F40']}
+          style={styles.headerGradient}
+          start={{x: 0, y: 0}}
+          end={{x: 1, y: 0}}
         >
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Posts</Text>
-        <View style={styles.headerRight} />
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="chevron-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>Trails & Adventures</Text>
+            <Ionicons name="leaf" size={18} color="rgba(255,255,255,0.7)" style={styles.headerIcon} />
+          </View>
+          
+          <TouchableOpacity style={styles.headerRight}>
+            <Ionicons name="search-outline" size={22} color="#fff" />
+          </TouchableOpacity>
+        </LinearGradient>
       </View>
       
       <ScrollView
@@ -737,33 +752,53 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    overflow: 'hidden',
+    borderBottomLeftRadius: 15,
+    borderBottomRightRadius: 15,
+    marginBottom: 5,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+  },
+  headerGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'android' ? 50 : 12,
-    paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECEFF1',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    paddingBottom: 16,
   },
   backButton: {
-    padding: 6,
+    padding: 8,
     borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    marginRight: 10,
+  },
+  headerTitleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    flex: 1,
     textAlign: 'center',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
-    color: '#263238',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  headerIcon: {
+    marginLeft: 6,
+    marginTop: 2,
   },
   headerRight: {
-    width: 30,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
   createPostContainer: {
     backgroundColor: '#FFFFFF',
@@ -772,6 +807,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 6,
     borderRadius: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#3A5A40', // Medium forest green accent
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -783,7 +820,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#37474F',
     textAlignVertical: 'top',
-    padding: 4,
+    padding: 8,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
   },
   mediaPreviewContainer: {
     marginTop: 12,
@@ -798,7 +837,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#ECEFF1',
+    borderColor: '#E0E5E0',
   },
   mediaPreviewVideoContainer: {
     position: 'relative',
@@ -832,7 +871,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#ECEFF1',
+    borderTopColor: '#E0E5E0',
   },
   mediaButtons: {
     flexDirection: 'row',
@@ -845,33 +884,36 @@ const styles = StyleSheet.create({
     padding: 8,
     marginRight: 10,
     borderRadius: 8,
+    backgroundColor: '#F0F4F0',
   },
   addMediaText: {
     marginLeft: 5,
     fontSize: 13,
     fontWeight: '500',
-    color: '#4A6572',
+    color: '#2C5F2D', // Dark forest green
   },
   postButton: {
-    backgroundColor: '#3F51B5',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    backgroundColor: '#4A7C59', // Medium forest green
+    paddingVertical: 10,
+    paddingHorizontal: 18,
     borderRadius: 25,
-    elevation: 1,
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 1,
-    minWidth: 70,
+    minWidth: 80,
     alignItems: 'center',
   },
   postButtonDisabled: {
-    backgroundColor: '#C5CAE9',
+    backgroundColor: '#A3B18A', // Light forest green
+    opacity: 0.7,
   },
   postButtonText: {
     color: '#FFF',
     fontWeight: '600',
     fontSize: 14,
+    letterSpacing: 0.5,
   },
   postCard: {
     backgroundColor: '#FFFFFF',
@@ -884,23 +926,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.07,
     shadowRadius: 3,
     elevation: 2,
+    borderTopWidth: 3,
+    borderTopColor: '#3A5A40', // Medium forest green
   },
   postHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 14,
+    backgroundColor: '#FCFCFC',
   },
   avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     marginRight: 12,
-    borderWidth: 0.5,
-    borderColor: '#E0E0E0',
+    borderWidth: 2,
+    borderColor: '#4A7C59', // Medium forest green
   },
   username: {
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 16,
     color: '#263238',
   },
   timestamp: {
@@ -1017,11 +1062,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: '#ECEFF1',
+    borderColor: '#E0E5E0',
+    backgroundColor: '#FCFCFC',
   },
   statsText: {
     fontSize: 13,
-    color: '#78909C',
+    color: '#4A7C59', // Medium forest green
+    fontWeight: '500',
   },
   postActions: {
     flexDirection: 'row',
@@ -1032,7 +1079,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
+    marginHorizontal: 4,
+    backgroundColor: '#F5F7F5',
+    borderRadius: 8,
   },
   actionButtonDisabled: {
     opacity: 0.7,
@@ -1041,10 +1091,10 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontSize: 14,
     fontWeight: '500',
-    color: '#757575',
+    color: '#4A7C59', // Medium forest green
   },
   likedText: {
-    color: '#E57373',
+    color: '#2C5F2D', // Dark forest green
   },
   emptyStateContainer: {
     alignItems: 'center',
@@ -1055,7 +1105,7 @@ const styles = StyleSheet.create({
   emptyStateText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#78909C',
+    color: '#4A7C59', // Medium forest green
     marginTop: 16,
   },
   emptyStateSubtext: {
