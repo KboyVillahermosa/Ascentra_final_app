@@ -32,7 +32,7 @@ const { width } = Dimensions.get('window');
 const CARD_WIDTH = width - 32; // Account for margins and padding
 
 // Custom HikeHistoryItem component with map
-const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPress }) => {
+const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPress, onDelete }) => {
   // Check if the hike has media files and route coordinates
   const hasMedia = hike.media && Array.isArray(hike.media) && hike.media.length > 0;
   const hasRoute = hike.routeCoordinates && Array.isArray(hike.routeCoordinates) && hike.routeCoordinates.length > 1;
@@ -269,7 +269,7 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPr
         </View>
       </View>
       
-      {/* Feelings badge if available */}
+      {/* Feeling badge if available */}
       {hike.feeling && (
         <View style={styles.feelingBadge}>
           <Ionicons 
@@ -283,6 +283,37 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPr
           <Text style={styles.feelingText}>Felt {hike.feeling}</Text>
         </View>
       )}
+      
+      {/* Add action buttons */}
+      <View style={styles.actionButtonsContainer}>
+        <TouchableOpacity 
+          style={styles.actionButton}
+          onPress={() => onPress()}
+        >
+          <Ionicons name="eye-outline" size={20} color="#2E7D32" />
+          <Text style={styles.actionButtonText}>View</Text>
+        </TouchableOpacity>
+        
+        <View style={styles.actionDivider} />
+        
+        <TouchableOpacity 
+          style={styles.actionButton}
+          onPress={() => onOptionsPress()}
+        >
+          <Ionicons name="ellipsis-horizontal" size={20} color="#666" />
+          <Text style={styles.actionButtonText}>More</Text>
+        </TouchableOpacity>
+        
+        <View style={styles.actionDivider} />
+        
+        <TouchableOpacity 
+          style={[styles.actionButton, styles.deleteButton]}
+          onPress={() => onDelete()}
+        >
+          <Ionicons name="trash-outline" size={20} color="#D32F2F" />
+          <Text style={[styles.actionButtonText, styles.deleteButtonText]}>Delete</Text>
+        </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
 };
@@ -576,6 +607,7 @@ export default function HikeHistoryScreen({ navigation }) {
         onMediaPress={handleMediaPress}
         onOptionsPress={() => handleOptionsPress(item.id)}
         onSyncPress={handleSyncHike}
+        onDelete={() => handleDeleteHike(item.id)}
       />
     </View>
   );
@@ -1098,5 +1130,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 8,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+    marginTop: 8,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  actionButtonText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 6,
+  },
+  actionDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#EEE',
+  },
+  deleteButton: {
+    // Optional: Add specific styling for the delete button
+  },
+  deleteButtonText: {
+    color: '#D32F2F',
   },
 });
