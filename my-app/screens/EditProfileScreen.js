@@ -124,12 +124,13 @@ export default function EditProfileScreen({ navigation }) {
         });
         
         // Create a filename
-        const fileName = `avatar-${user.id}-${Date.now()}.jpg`;
-        const filePath = `avatars/${fileName}`;
+        const fileName = `avatar-${Date.now()}.jpg`;
+        // Change the path to include user ID in the structure
+        const filePath = `${user.id}/${fileName}`;
         
         // Upload to Supabase Storage
         const { data, error } = await supabase.storage
-          .from('profiles')
+          .from('avatars')  // Change from 'profiles' to 'avatars'
           .upload(filePath, decode(base64), {
             contentType: 'image/jpeg',
             upsert: true
@@ -139,7 +140,7 @@ export default function EditProfileScreen({ navigation }) {
         
         // Get the public URL
         const { data: urlData } = supabase.storage
-          .from('profiles')
+          .from('avatars')  // Also change this to match
           .getPublicUrl(filePath);
         
         // Update state with the new avatar URL
