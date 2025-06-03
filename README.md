@@ -4,7 +4,7 @@
 <div align="center">
 
 
-# ASCENTRA_FINAL_APP
+# ASCENTRA
 
 <em>Elevate Your Hiking Experience, Connect with Nature</em>
 
