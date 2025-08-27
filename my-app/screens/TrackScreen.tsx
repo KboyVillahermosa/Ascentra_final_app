@@ -1,13 +1,25 @@
 import React from 'react'
 import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, StatusBar, Platform } from 'react-native'
-import { createStackNavigator } from '@react-navigation/stack'
+import { createStackNavigator, StackNavigationProp } from '@react-navigation/stack'
 import { Ionicons, MaterialIcons } from '@expo/vector-icons'
 import TrackingScreen from './TrackingScreen'
 import HikeHistoryScreen from './HikeHistoryScreen'
 
+type TrackStackParamList = {
+  TrackHome: undefined;
+  TrackingScreen: undefined;
+  HikeHistory: undefined;
+};
+
+type TrackHomeScreenNavigationProp = StackNavigationProp<TrackStackParamList, 'TrackHome'>;
+
+interface TrackHomeScreenProps {
+  navigation: TrackHomeScreenNavigationProp;
+}
+
 const Stack = createStackNavigator()
 
-function TrackHomeScreen({ navigation }) {
+function TrackHomeScreen({ navigation }: TrackHomeScreenProps) {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />

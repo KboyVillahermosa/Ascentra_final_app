@@ -12,30 +12,82 @@ import {
   ActivityIndicator,
   Modal
 } from 'react-native';
-import { supabase } from '../utils/supabase';
+import { supabase } from '../services/supabaseClient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getHikesForUser } from '../services/databaseService';
 import { formatDate, formatDistance, formatDuration, formatPace } from '../utils/formatters';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { RouteProp } from '@react-navigation/native';
+import { User } from '@supabase/supabase-js';
+import { RootStackParamList } from '../App';
 
-export default function ProfileScreen({ route, navigation }) {
+type ProfileScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Profile'>;
+type ProfileScreenRouteProp = RouteProp<RootStackParamList, 'Profile'>;
+
+interface ProfileScreenProps {
+  navigation: ProfileScreenNavigationProp;
+  route: ProfileScreenRouteProp;
+}
+
+interface Profile {
+  id: string;
+  username: string;
+  avatar_url?: string;
+  bio?: string;
+}
+
+interface Post {
+  id: string;
+  content?: string;
+  image_url?: string;
+  created_at: string;
+  user_id: string;
+  likeCount: number;
+  commentCount: number;
+  isLiked: boolean;
+}
+
+interface UserStats {
+  postsCount: number;
+  hikesCount: number;
+  totalDistance: number;
+}
+
+interface MediaItem {
+  uri: string;
+  type: 'image' | 'video';
+}
+
+interface Hike {
+  id: string;
+  title?: string;
+  description?: string;
+  date: string;
+  distance: number;
+  duration: number;
+  elevation: number;
+  media?: MediaItem[];
+}
+
+export default function ProfileScreen({ route, navigation }: ProfileScreenProps) {
   const { userId } = route.params || {};
-  const [profile, setProfile] = useState(null);
-  const [posts, setPosts] = useState([]);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [postsLoading, setPostsLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats] = useState({
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [postsLoading, setPostsLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [stats, setStats] = useState<UserStats>({
     postsCount: 0,
     hikesCount: 0,
     totalDistance: 0
   });
   
   // Add state for hikes
-  const [hikes, setHikes] = useState([]);
-  const [hikesLoading, setHikesLoading] = useState(true);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [hikes, setHikes] = useState<Hike[]>([]);
+  const [hikesLoading, setHikesLoading] = useState<boolean>(true);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
 
   // Determine if we're viewing the current user's profile or someone else's
   const isOwnProfile = !userId || (currentUser && userId === currentUser.id);
@@ -63,13 +115,13 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }, [currentUser, userId]);
 
-  async function getCurrentUser() {
+  async function getCurrentUser(): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser();
     setCurrentUser(user);
   }
 
   // Add function to fetch user hikes
-  async function fetchUserHikes(id) {
+  async function fetchUserHikes(id: string): Promise<void> {
     try {
       setHikesLoading(true);
       console.log('Fetching hikes for user ID:', id);
@@ -95,7 +147,7 @@ export default function ProfileScreen({ route, navigation }) {
       
       // Sort by date (newest first)
       const sortedHikes = userHikes.sort((a, b) => {
-        return new Date(b.date) - new Date(a.date);
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
       });
       
       // Limit to most recent 5 for profile view
@@ -110,7 +162,7 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }
 
-  async function fetchProfile(id) {
+  async function fetchProfile(id: string): Promise<void> {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -130,7 +182,7 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }
 
-  async function fetchUserPosts(id) {
+  async function fetchUserPosts(id: string): Promise<void> {
     setPostsLoading(true);
     try {
       const { data, error } = await supabase
@@ -148,7 +200,7 @@ export default function ProfileScreen({ route, navigation }) {
         console.error('Error fetching user posts:', error);
       } else {
         // Transform data to include like counts and check if user liked it
-        const postsWithLikes = await Promise.all(data.map(async (post) => {
+        const postsWithLikes = await Promise.all(data.map(async (post: any) => {
           // Check if current user liked this post
           const { data: likeData, error: likeError } = await supabase
             .from('likes')
@@ -175,7 +227,7 @@ export default function ProfileScreen({ route, navigation }) {
   }
 
   // Update fetchUserStats to use local data
-  async function fetchUserStats(id) {
+  async function fetchUserStats(id: string): Promise<void> {
     try {
       // Get post count from Supabase
       const { data: postsData, error: postsError } = await supabase
@@ -206,20 +258,20 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }
 
-  function onRefresh() {
+  function onRefresh(): void {
     setRefreshing(true);
     
     Promise.all([
-      fetchProfile(profileId),
-      fetchUserPosts(profileId),
-      fetchUserStats(profileId),
-      fetchUserHikes(profileId)
+      fetchProfile(profileId || ''),
+      fetchUserPosts(profileId || ''),
+      fetchUserStats(profileId || ''),
+      fetchUserHikes(profileId || '')
     ]).finally(() => {
       setRefreshing(false);
     });
   }
 
-  async function toggleLike(postId, isLiked) {
+  async function toggleLike(postId: string, isLiked: boolean): Promise<void> {
     if (!currentUser) {
       Alert.alert('Authentication Required', 'Please log in to like posts');
       return;
@@ -260,15 +312,15 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }
 
-  function navigateToComments(postId) {
+  function navigateToComments(postId: string): void {
     navigation.navigate('Comments', { postId });
   }
 
-  function editProfile() {
+  function editProfile(): void {
     navigation.navigate('EditProfile');
   }
 
-  async function handleSignOut() {
+  async function handleSignOut(): Promise<void> {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
@@ -277,30 +329,30 @@ export default function ProfileScreen({ route, navigation }) {
         routes: [{ name: 'Login' }]
       });
     } catch (error) {
-      console.error('Error signing out:', error.message);
-      Alert.alert('Sign Out Failed', error.message);
+      console.error('Error signing out:', error);
+      Alert.alert('Sign Out Failed', error instanceof Error ? error.message : 'Unknown error');
     }
   }
 
-  function openSettingsModal() {
+  function openSettingsModal(): void {
     setShowSettingsModal(true);
   }
 
-  function closeSettingsModal() {
+  function closeSettingsModal(): void {
     setShowSettingsModal(false);
   }
 
-  function navigateToChangePassword() {
+  function navigateToChangePassword(): void {
     closeSettingsModal();
     navigation.navigate('ChangePassword');
   }
 
-  function navigateToEditProfile() {
+  function navigateToEditProfile(): void {
     closeSettingsModal();
     navigation.navigate('EditProfile');
   }
 
-  function renderPostItem({ item }) {
+  function renderPostItem({ item }: { item: Post }): JSX.Element {
     return (
       <View style={styles.postCard}>
         <View style={styles.postHeader}>
@@ -358,10 +410,10 @@ export default function ProfileScreen({ route, navigation }) {
   }
 
   // Function to render a hike activity item
-  function renderHikeItem({ item }) {
+  function renderHikeItem({ item }: { item: Hike }): JSX.Element {
     // Check if the hike has media files
     const hasMedia = item.media && Array.isArray(item.media) && item.media.length > 0;
-    const mainImage = hasMedia ? { uri: item.media[0].uri } : null;
+    const mainImage = hasMedia && item.media && item.media[0] ? { uri: item.media[0].uri } : null;
     
     return (
       <TouchableOpacity 
@@ -542,7 +594,7 @@ export default function ProfileScreen({ route, navigation }) {
               style={styles.viewAllButton}
               onPress={() => {
                 // Navigate to a screen showing all activities
-                navigation.navigate('HikeHistory');
+                navigation.navigate('HikeHistory', { userId: profileId });
               }}
             >
               <Text style={styles.viewAllText}>View all</Text>

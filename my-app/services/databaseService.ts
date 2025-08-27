@@ -1,9 +1,75 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase, isUserLoggedIn } from '../utils/supabase';
+import { supabase, isUserLoggedIn } from './supabaseClient';
 import { sanitizeRouteCoordinates } from '../utils/mapHelpers';
 
+// Type definitions
+export interface HikeStats {
+  distance: number;
+  duration: number;
+  pace: number;
+  elevation: number;
+}
+
+export interface MediaItem {
+  uri: string;
+  type: 'image' | 'video';
+  name: string;
+}
+
+export interface RouteCoordinate {
+  latitude: number;
+  longitude: number;
+  timestamp?: number;
+}
+
+export interface HikeData {
+  id?: string;
+  title?: string;
+  description?: string;
+  activityType?: string;
+  feeling?: string;
+  privateNotes?: string;
+  date: string;
+  stats: HikeStats;
+  distance?: number;
+  duration?: number;
+  pace?: number;
+  elevation?: number;
+  routeCoordinates: RouteCoordinate[];
+  media: MediaItem[];
+  synced?: boolean;
+}
+
+export interface SavedHike {
+  id: string;
+  title: string;
+  description: string;
+  activityType: string;
+  feeling: string;
+  privateNotes: string;
+  date: string;
+  distance: number;
+  duration: number;
+  pace: number;
+  elevation: number;
+  routeCoordinates: RouteCoordinate[];
+  media: MediaItem[];
+  synced: boolean;
+  stats?: HikeStats; // Optional for backward compatibility
+}
+
+export interface SyncResult {
+  success: boolean;
+  synced?: number;
+  total?: number;
+  imported?: number;
+  errors?: Array<{ hikeId: string; error: string }>;
+  reason?: string;
+  error?: string;
+}
+
 // Helper function to get current user ID - improved version
-export const getCurrentUserId = async () => {
+export const getCurrentUserId = async (): Promise<string> => {
   try {
     // First check if a user is logged in using the isUserLoggedIn utility
     const loggedIn = await isUserLoggedIn();
@@ -29,13 +95,13 @@ export const getCurrentUserId = async () => {
 };
 
 // Helper to get user-specific storage key
-const getUserHikesKey = async () => {
+const getUserHikesKey = async (): Promise<string> => {
   const userId = await getCurrentUserId();
   return `@ascentra_hikes_${userId}`;
 };
 
 // Debug function
-export const debugStorage = async () => {
+export const debugStorage = async (): Promise<boolean> => {
   try {
     const keys = await AsyncStorage.getAllKeys();
     console.log('All AsyncStorage keys:', keys);
@@ -52,7 +118,7 @@ export const debugStorage = async () => {
 };
 
 // Save hike with user-specific key
-export const saveHikeToLocalDB = async (hikeData) => {
+export const saveHikeToLocalDB = async (hikeData: HikeData): Promise<string> => {
   try {
     // Generate ID if not provided
     const hikeId = hikeData.id || Date.now().toString();
@@ -80,7 +146,7 @@ export const saveHikeToLocalDB = async (hikeData) => {
       media: Array.isArray(hikeData.media) ? hikeData.media.map(item => ({
         uri: item.uri,
         type: item.type || (item.uri && item.uri.endsWith('.mp4') ? 'video' : 'image'),
-        name: item.name || item.fileName || item.uri.split('/').pop()
+        name: item.name || item.uri.split('/').pop() || 'unknown'
       })) : [],
       synced: false, // Track sync status with Supabase
     };
@@ -97,7 +163,7 @@ export const saveHikeToLocalDB = async (hikeData) => {
     }
     
     // Add new hike or update existing
-    const existingIndex = hikes.findIndex(h => h.id === hikeId);
+    const existingIndex = hikes.findIndex((h: SavedHike) => h.id === hikeId);
     if (existingIndex >= 0) {
       hikes[existingIndex] = hikeToSave;
     } else {
@@ -120,7 +186,7 @@ export const saveHikeToLocalDB = async (hikeData) => {
           hikes[existingIndex] = hikeToSave;
         } else {
           // Find the recently added hike
-          const newIndex = hikes.findIndex(h => h.id === hikeId);
+          const newIndex = hikes.findIndex((h: SavedHike) => h.id === hikeId);
           if (newIndex >= 0) {
             hikes[newIndex].synced = true;
           }
@@ -143,7 +209,7 @@ export const saveHikeToLocalDB = async (hikeData) => {
 };
 
 // Export the sync function so it can be used by other components
-export const syncHikeToSupabase = async (hike, userId) => {
+export const syncHikeToSupabase = async (hike: SavedHike, userId: string): Promise<boolean> => {
   try {
     console.log('Starting direct Supabase sync for hike:', hike.id);
     
@@ -219,7 +285,7 @@ export const syncHikeToSupabase = async (hike, userId) => {
     const hikesStr = await AsyncStorage.getItem(storageKey);
     if (hikesStr) {
       const hikes = JSON.parse(hikesStr);
-      const updatedHikes = hikes.map(h => {
+      const updatedHikes = hikes.map((h: SavedHike) => {
         if (h.id === hike.id) {
           return { ...h, synced: true };
         }
@@ -238,7 +304,7 @@ export const syncHikeToSupabase = async (hike, userId) => {
 };
 
 // Sync all local hikes to Supabase
-export const syncAllHikesToSupabase = async () => {
+export const syncAllHikesToSupabase = async (): Promise<SyncResult> => {
   try {
     const userId = await getCurrentUserId();
     
@@ -271,7 +337,7 @@ export const syncAllHikesToSupabase = async () => {
         syncedCount++;
       } catch (error) {
         console.error(`Failed to sync hike ${hike.id}:`, error);
-        errors.push({ hikeId: hike.id, error: error.message });
+        errors.push({ hikeId: hike.id, error: (error as Error).message });
       }
     }
     
@@ -286,12 +352,12 @@ export const syncAllHikesToSupabase = async () => {
     };
   } catch (error) {
     console.error('Error in bulk sync to Supabase:', error);
-    return { success: false, error: error.message };
+    return { success: false, error: (error as Error).message };
   }
 };
 
 // Fetch hikes from Supabase (useful when user logs in on a new device)
-export const fetchHikesFromSupabase = async () => {
+export const fetchHikesFromSupabase = async (): Promise<SyncResult> => {
   try {
     const userId = await getCurrentUserId();
     
@@ -317,7 +383,7 @@ export const fetchHikesFromSupabase = async () => {
     }
     
     // Convert Supabase format to app format
-    const appHikes = data.map(h => ({
+    const appHikes: SavedHike[] = data.map((h: any) => ({
       id: h.id,
       title: h.title,
       description: h.description,
@@ -325,14 +391,12 @@ export const fetchHikesFromSupabase = async () => {
       feeling: h.feeling,
       privateNotes: h.private_notes,
       date: h.date,
-      stats: {
-        distance: h.distance,
-        duration: h.duration,
-        pace: h.pace,
-        elevation: h.elevation
-      },
-      routeCoordinates: h.route_coordinates,
-      media: h.media,
+      distance: h.distance,
+      duration: h.duration,
+      pace: h.pace,
+      elevation: h.elevation,
+      routeCoordinates: h.route_coordinates || [],
+      media: h.media || [],
       synced: true
     }));
     
@@ -342,7 +406,7 @@ export const fetchHikesFromSupabase = async () => {
     let localHikes = hikesStr ? JSON.parse(hikesStr) : [];
     
     // Create a map of existing hike IDs
-    const existingHikeIds = new Set(localHikes.map(h => h.id));
+    const existingHikeIds = new Set(localHikes.map((h: SavedHike) => h.id));
     
     // Add only new hikes from Supabase
     let importedCount = 0;
@@ -361,14 +425,14 @@ export const fetchHikesFromSupabase = async () => {
       imported: importedCount, 
       total: appHikes.length 
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching from Supabase:', error);
     return { success: false, error: error.message };
   }
 };
 
 // Update the delete function to also delete from Supabase
-export const deleteHike = async (hikeId) => {
+export const deleteHike = async (hikeId: string): Promise<boolean> => {
   try {
     // Get user-specific key
     const userId = await getCurrentUserId();
@@ -383,7 +447,7 @@ export const deleteHike = async (hikeId) => {
     const hikes = JSON.parse(hikesStr);
     
     // Filter out the one to delete
-    const updatedHikes = hikes.filter(hike => hike.id !== hikeId);
+    const updatedHikes = hikes.filter((hike: SavedHike) => hike.id !== hikeId);
     
     // Save back to AsyncStorage
     await AsyncStorage.setItem(storageKey, JSON.stringify(updatedHikes));
@@ -415,7 +479,7 @@ export const deleteHike = async (hikeId) => {
 };
 
 // Get hikes for a specific user (for profile viewing)
-export const getHikesForUser = async (userId) => {
+export const getHikesForUser = async (userId?: string): Promise<SavedHike[]> => {
   try {
     // Fall back to current user if no ID provided
     const targetUserId = userId || await getCurrentUserId();
@@ -441,7 +505,7 @@ export const getHikesForUser = async (userId) => {
 };
 
 // Get a specific hike by its ID
-export const getHikeById = async (hikeId) => {
+export const getHikeById = async (hikeId: string): Promise<SavedHike | null> => {
   try {
     // Get user-specific key
     const userId = await getCurrentUserId();
@@ -455,8 +519,8 @@ export const getHikeById = async (hikeId) => {
     }
     
     // Parse hikes and find the one with matching ID
-    const hikes = JSON.parse(hikesStr);
-    const hike = hikes.find(h => h.id.toString() === hikeId.toString());
+    const hikes: SavedHike[] = JSON.parse(hikesStr);
+    const hike = hikes.find((h: SavedHike) => h.id.toString() === hikeId.toString());
     
     if (!hike) {
       console.log(`Hike with ID ${hikeId} not found`);
@@ -484,7 +548,7 @@ export const getHikeById = async (hikeId) => {
 };
 
 // Get all hikes for current user only
-export const getAllHikes = async () => {
+export const getAllHikes = async (): Promise<SavedHike[]> => {
   try {
     // Get user-specific key
     const userId = await getCurrentUserId();

@@ -2,10 +2,33 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
-import { supabase } from './utils/supabase';
+import { supabase } from './services/supabaseClient';
 import * as Linking from 'expo-linking';
 import * as SecureStore from 'expo-secure-store';
 import { linking } from './utils/linking';
+import { Session } from '@supabase/supabase-js';
+
+// Navigation types
+export type RootStackParamList = {
+  Home: undefined;
+  Login: undefined;
+  Register: undefined;
+  EmailConfirmation: { email: string };
+  Posts: undefined;
+  Comments: { postId: string };
+  Profile: { userId?: string };
+  EditProfile: undefined;
+  ChangePassword: undefined;
+  HikingSpotDetails: { spot: any };
+  ActivityDetails: { activity: any };
+  Tracking: undefined;
+  HikeHistory: { userId?: string | null };
+  SaveActivity: { routeCoordinates: any[]; stats: any };
+  MediaViewer: { mediaItems: any[]; initialIndex: number };
+  HikeDetail: { hikeId: string };
+  ActivityComments: { activityId: string };
+  SaveConfirmation: { hikeId: string };
+};
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -13,6 +36,7 @@ import RegisterScreen from './screens/RegisterScreen';
 import HomeScreen from './screens/HomeScreen';
 import HikingSpotDetailsScreen from './screens/HikingSpotDetailsScreen';
 import ActivityDetailsScreen from './screens/ActivityDetailsScreen';
+import TrackScreen from './screens/TrackScreen';
 import TrackingScreen from './screens/TrackingScreen';
 import HikeHistoryScreen from './screens/HikeHistoryScreen';
 import EmailConfirmationScreen from './screens/EmailConfirmationScreen';
@@ -27,10 +51,10 @@ import HikeDetailScreen from './screens/HikeDetailScreen';
 import ActivityCommentsScreen from './screens/ActivityCommentsScreen';
 import SaveConfirmationScreen from './screens/SaveConfirmationScreen';
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 // Helper function to store auth tokens securely
-async function saveToken(key, value) {
+async function saveToken(key: string, value: string): Promise<void> {
   try {
     await SecureStore.setItemAsync(key, value);
   } catch (error) {
@@ -39,7 +63,7 @@ async function saveToken(key, value) {
 }
 
 // Helper function to retrieve auth tokens
-async function getToken(key) {
+async function getToken(key: string): Promise<string | null> {
   try {
     return await SecureStore.getItemAsync(key);
   } catch (error) {
@@ -48,9 +72,9 @@ async function getToken(key) {
   }
 }
 
-export default function App() {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
+export default function App(): JSX.Element {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
 
   // Initialize Supabase auth with stored tokens on startup
   useEffect(() => {
@@ -123,7 +147,7 @@ export default function App() {
   }, []);
 
   // Simplified deep link handler
-  const handleDeepLink = async ({ url }) => {
+  const handleDeepLink = async ({ url }: { url: string }): Promise<void> => {
     if (!url) return;
     
     console.log("Received deep link:", url);
@@ -133,9 +157,16 @@ export default function App() {
         const parsedUrl = Linking.parse(url);
         
         if (parsedUrl.queryParams?.access_token) {
+          const accessToken = Array.isArray(parsedUrl.queryParams.access_token) 
+            ? parsedUrl.queryParams.access_token[0] 
+            : parsedUrl.queryParams.access_token;
+          const refreshToken = Array.isArray(parsedUrl.queryParams.refresh_token) 
+            ? parsedUrl.queryParams.refresh_token[0] 
+            : parsedUrl.queryParams.refresh_token || '';
+            
           const { data, error } = await supabase.auth.setSession({
-            access_token: parsedUrl.queryParams.access_token,
-            refresh_token: parsedUrl.queryParams.refresh_token || '',
+            access_token: accessToken,
+            refresh_token: refreshToken,
           });
           
           if (!error && data?.session) {
@@ -165,7 +196,7 @@ export default function App() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#2E7D32" />
-        <Text style={styles.loadingText}>Loading HikeWise...</Text>
+        <Text style={styles.loadingText}>Loading Ascentra...</Text>
       </View>
     );
   }

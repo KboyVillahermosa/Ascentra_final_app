@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
   RefreshControl
 } from 'react-native';
-import { supabase } from '../utils/supabase';
+import { supabase } from '../services/supabaseClient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';

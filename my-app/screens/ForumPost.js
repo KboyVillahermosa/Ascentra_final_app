@@ -18,7 +18,7 @@ import {
   Dimensions,
   Pressable
 } from 'react-native';
-import { supabase, uploadFileToSupabase } from '../utils/supabase';
+import { supabase, uploadFileToSupabase } from '../services/supabaseClient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';

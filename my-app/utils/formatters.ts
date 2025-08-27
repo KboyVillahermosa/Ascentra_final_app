@@ -1,9 +1,9 @@
 /**
  * Format distance in meters to Strava-like km display
- * @param {number} meters - Distance in meters
- * @returns {string} - Formatted distance string
+ * @param meters - Distance in meters
+ * @returns Formatted distance string
  */
-export const formatDistance = (meters) => {
+export const formatDistance = (meters: number): string => {
   // Return 0.00 km if no distance or invalid
   if (!meters || isNaN(meters) || meters < 0) return '0.00 km';
   
@@ -23,7 +23,7 @@ export const formatDistance = (meters) => {
 };
 
 // Format duration as MM:SS or HH:MM:SS depending on length
-export const formatDuration = (seconds, strava = false) => {
+export const formatDuration = (seconds: number, strava: boolean = false): string => {
   if (!seconds) return '0:00';
   
   if (strava) {
@@ -52,7 +52,7 @@ export const formatDuration = (seconds, strava = false) => {
 };
 
 // Format pace as MM:SS/km
-export const formatPace = (metersPerSecond) => {
+export const formatPace = (metersPerSecond: number): string => {
   if (!metersPerSecond || metersPerSecond === 0) return '-:--/km';
   
   // Convert m/s to s/km
@@ -65,7 +65,7 @@ export const formatPace = (metersPerSecond) => {
 };
 
 // Format date
-export const formatDate = (dateString) => {
+export const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
   return date.toLocaleDateString('en-US', { 
     year: 'numeric', 
@@ -77,9 +77,9 @@ export const formatDate = (dateString) => {
 };
 
 // Format a date into a relative time string (e.g. "2 hours ago")
-export function formatRelativeTime(date) {
+export function formatRelativeTime(date: Date): string {
   const now = new Date();
-  const diffInSeconds = Math.floor((now - date) / 1000);
+  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
   
   if (diffInSeconds < 60) {
     return 'Just now';

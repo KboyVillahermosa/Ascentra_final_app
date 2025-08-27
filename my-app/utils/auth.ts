@@ -1,13 +1,19 @@
-import { supabase } from './supabase';
+import { supabase } from '../services/supabaseClient';
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AuthResponse, Session, User } from '@supabase/supabase-js';
+
+interface SessionData {
+  user: User | null;
+  session: Session | null;
+}
 
 // Register for redirect
 WebBrowser.maybeCompleteAuthSession();
 
-export async function signInWithGoogle() {
+export async function signInWithGoogle(): Promise<SessionData | undefined> {
   try {
     console.log("Starting Google Sign-in flow...");
     
@@ -20,7 +26,6 @@ export async function signInWithGoogle() {
     const redirectUri = makeRedirectUri({
       scheme: 'my-app', // Must match scheme in app.json
       path: 'auth/callback',
-      useProxy: true, // Ensures compatibility with Expo Go
     });
     console.log("Redirect URI:", redirectUri);
     console.log('Redirect URI:', redirectUri);
@@ -85,7 +90,7 @@ export async function signInWithGoogle() {
 }
 
 // Utility function for manual token testing
-export async function testWithToken(tokenUrl) {
+export async function testWithToken(tokenUrl: string): Promise<SessionData | null> {
   try {
     // Extract access token from URL
     const url = new URL(tokenUrl);

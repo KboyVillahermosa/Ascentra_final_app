@@ -1,7 +1,7 @@
 import * as Linking from 'expo-linking';
 
 export const linking = {
-  prefixes: ['hikewise://', 'https://email-confirmation-6j4r.onrender.com'],
+  prefixes: ['ascentra://', 'https://email-confirmation-6j4r.onrender.com'],
   config: {
     screens: {
       Login: 'login',

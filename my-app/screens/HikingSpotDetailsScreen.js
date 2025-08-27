@@ -14,7 +14,7 @@ import {
   StatusBar,
   SafeAreaView
 } from 'react-native'
-import { supabase } from '../utils/supabase'
+import { supabase } from '../services/supabaseClient'
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons'
 import MapView, { Marker } from 'react-native-maps'
 

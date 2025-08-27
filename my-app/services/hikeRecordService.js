@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '../utils/supabase';
+import { supabase } from './supabaseClient';
 import { Alert, Platform } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 

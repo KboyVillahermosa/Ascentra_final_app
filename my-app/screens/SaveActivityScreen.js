@@ -19,7 +19,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { saveHikeToLocalDB, getCurrentUserId, syncHikeToSupabase } from '../services/databaseService';
-import { supabase, isUserLoggedIn } from '../utils/supabase';
+import { supabase, isUserLoggedIn } from '../services/supabaseClient';
 import NetInfo from '@react-native-community/netinfo';
 
 export default function SaveActivityScreen({ navigation, route }) {

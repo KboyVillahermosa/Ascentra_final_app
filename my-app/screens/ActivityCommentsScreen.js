@@ -14,7 +14,7 @@ import {
   StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../utils/supabase';
+import { supabase } from '../services/supabaseClient';
 
 export default function ActivityCommentsScreen({ route, navigation }) {
   const { activityId, activityTitle } = route.params;

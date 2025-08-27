@@ -14,7 +14,7 @@ import {
   ScrollView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../utils/supabase';
+import { supabase } from '../services/supabaseClient';
 
 export default function ChangePasswordScreen({ navigation }) {
   const [password, setPassword] = useState('');

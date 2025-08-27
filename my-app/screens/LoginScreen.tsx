@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react';
 import { 
   StyleSheet, 
   View, 
@@ -15,36 +15,62 @@ import {
   ImageBackground,
   Dimensions,
   ScrollView
-} from 'react-native'
-import { supabase } from '../utils/supabase'
+} from 'react-native';
+import { supabase, isInDemoMode } from '../services/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient';
 import { signInWithGoogle } from '../utils/auth';
 import { Ionicons } from '@expo/vector-icons';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../App';
 
 const { width, height } = Dimensions.get('window');
 
-export default function LoginScreen({ navigation }) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
-  async function signInWithEmail() {
+interface LoginScreenProps {
+  navigation: LoginScreenNavigationProp;
+}
+
+export default function LoginScreen({ navigation }: LoginScreenProps): JSX.Element {
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+
+  async function signInWithEmail(): Promise<void> {
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields')
-      return
+      Alert.alert('Error', 'Please fill in all fields');
+      return;
     }
     
-    setLoading(true)
+    // Handle demo mode
+    if (isInDemoMode) {
+      Alert.alert(
+        '🎭 Demo Mode', 
+        'Login is disabled in demo mode.\n\nTo enable login:\n1. Create a Supabase project\n2. Update your .env file\n3. Restart the app\n\nSee FIX_REGISTRATION_NOW.md for instructions.'
+      );
+      return;
+    }
+    
+    setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
-    })
+    });
 
-    if (error) Alert.alert('Error', error.message)
-    setLoading(false)
+    if (error) Alert.alert('Error', error.message);
+    setLoading(false);
   }
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async (): Promise<void> => {
+    // Handle demo mode
+    if (isInDemoMode) {
+      Alert.alert(
+        '🎭 Demo Mode', 
+        'Google Sign-in is disabled in demo mode.\n\nTo enable authentication:\n1. Create a Supabase project\n2. Update your .env file\n3. Restart the app\n\nSee FIX_REGISTRATION_NOW.md for instructions.'
+      );
+      return;
+    }
+    
     try {
       setLoading(true);
       const session = await signInWithGoogle();
@@ -53,13 +79,13 @@ export default function LoginScreen({ navigation }) {
       console.log("Session returned:", session ? "Session exists" : "No session");
       
       if (session && session.session) {
-        // Navigate to Main screen
-        navigation.replace('Main'); // Use replace instead of navigate
+        // Navigation will be handled automatically by the auth state change
+        console.log('Google sign-in successful');
       } else {
         console.log("No valid session returned");
         Alert.alert("Login Error", "Could not retrieve session after login");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Google sign-in error in LoginScreen:", error);
       Alert.alert("Login Error", error.message);
     } finally {
@@ -83,7 +109,7 @@ export default function LoginScreen({ navigation }) {
           >
             <View style={styles.headerContent}>
               <Text style={styles.headerText}>Welcome to</Text>
-              <Text style={styles.headerTitle}>HikeWise</Text>
+              <Text style={styles.headerTitle}>Ascentra</Text>
             </View>
           </LinearGradient>
         </ImageBackground>

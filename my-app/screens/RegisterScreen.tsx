@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { 
   StyleSheet, 
   View, 
@@ -15,19 +15,34 @@ import {
   ImageBackground,
   Dimensions
 } from 'react-native'
-import { supabase } from '../utils/supabase'
-import { LinearGradient } from 'expo-linear-gradient';
+import { supabase, isInDemoMode } from '../services/supabaseClient'
+import { LinearGradient } from 'expo-linear-gradient'
+import { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { testSupabaseConnection, testBasicNetworkConnectivity } from '../utils/networkTest'
+import { runValidation } from '../utils/validateSetup'
+
+type RootStackParamList = {
+  Login: undefined;
+  Register: undefined;
+  Main: undefined;
+};
+
+type RegisterScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Register'>;
+
+interface RegisterScreenProps {
+  navigation: RegisterScreenNavigationProp;
+}
 
 const { width, height } = Dimensions.get('window');
 
-export default function RegisterScreen({ navigation }) {
-  const [username, setUsername] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+export default function RegisterScreen({ navigation }: RegisterScreenProps) {
+  const [username, setUsername] = useState<string>('')
+  const [email, setEmail] = useState<string>('')
+  const [password, setPassword] = useState<string>('')
+  const [confirmPassword, setConfirmPassword] = useState<string>('')
+  const [loading, setLoading] = useState<boolean>(false)
 
-  async function signUpWithEmail() {
+  async function signUpWithEmail(): Promise<void> {
     if (!username || !email || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill in all fields')
       return
@@ -38,28 +53,79 @@ export default function RegisterScreen({ navigation }) {
       return
     }
 
-    setLoading(true)
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: email,
-      password: password,
-      options: {
-        data: {
-          username: username
-        }
-      }
-    })
-
-    if (authError) {
-      Alert.alert('Error', authError.message)
-      setLoading(false)
+    // Handle demo mode
+    if (isInDemoMode) {
+      Alert.alert(
+        '🎭 Demo Mode', 
+        'Registration is disabled in demo mode.\n\nTo enable registration:\n1. Create a Supabase project\n2. Update your .env file\n3. Restart the app\n\nSee FIX_REGISTRATION_NOW.md for instructions.',
+        [
+          { text: 'OK', style: 'default' },
+          { text: 'Go to Login', onPress: () => navigation.navigate('Login') }
+        ]
+      )
       return
     }
 
-    // The user has been created but may need email verification
-    Alert.alert('Success', 'Registration successful! Please check your email for confirmation.')
-    navigation.navigate('Login')
+    setLoading(true)
     
-    setLoading(false)
+    try {
+      console.log('Attempting to register user with email:', email)
+      console.log('Supabase URL configured:', !!supabase.supabaseUrl)
+      
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          data: {
+            username: username
+          }
+        }
+      })
+
+      if (authError) {
+        console.error('Supabase auth error:', authError)
+        console.error('Auth error details:', {
+          message: authError.message,
+          status: authError.status,
+          statusCode: authError.status,
+        })
+        
+        // Run comprehensive diagnostics for auth errors
+        console.log('Running comprehensive diagnostics due to auth error...');
+        try {
+          await testBasicNetworkConnectivity();
+          await testSupabaseConnection();
+          await runValidation();
+        } catch (diagError) {
+          console.error('Diagnostic error:', diagError);
+        }
+        
+        Alert.alert('Registration Error', `${authError.message}\n\nPlease check your internet connection and try again.\n\nNetwork diagnostics have been logged to the console.`)
+        setLoading(false)
+        return
+      }
+
+      console.log('Registration successful:', authData)
+      // The user has been created but may need email verification
+      Alert.alert('Success', 'Registration successful! Please check your email for confirmation.')
+      navigation.navigate('Login')
+      
+    } catch (error) {
+      console.error('Network or unexpected error during registration:', error)
+      
+      // Run comprehensive diagnostics
+      console.log('Running comprehensive diagnostics...');
+      await testBasicNetworkConnectivity();
+      await testSupabaseConnection();
+      await runValidation();
+      
+      Alert.alert(
+        'Connection Error', 
+        'Unable to connect to the server. Please check your internet connection and try again.\n\nNetwork diagnostics have been logged to the console. If the problem persists, please contact support.'
+      )
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -90,7 +156,7 @@ export default function RegisterScreen({ navigation }) {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.title}>Join HikeWise</Text>
+          <Text style={styles.title}>Join Ascentra</Text>
           <Text style={styles.subtitle}>Create your account</Text>
           
           <View style={styles.formContainer}>

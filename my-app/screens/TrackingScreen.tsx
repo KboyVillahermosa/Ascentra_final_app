@@ -5,38 +5,63 @@ import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { formatDuration, formatPace, formatDistance } from '../utils/formatters';
 import NetInfo from '@react-native-community/netinfo';
-import { saveHikeToLocalDB, syncUnsentHikes, getAllHikes, getCurrentUserId } from '../services/databaseService';
-import { isUserLoggedIn } from '../utils/supabase';
+import { saveHikeToLocalDB, getAllHikes, getCurrentUserId } from '../services/databaseService';
+import { isUserLoggedIn } from '../services/supabaseClient';
 import HikeStats from '../components/HikeStats';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { RootStackParamList } from '../App';
 
-export default function TrackingScreen({ navigation }) {
-  const [tracking, setTracking] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState(null);
-  const [routeCoordinates, setRouteCoordinates] = useState([]);
-  const [stats, setStats] = useState({
+// Type definitions
+
+type TrackingScreenNavigationProp = StackNavigationProp<RootStackParamList>;
+
+interface TrackingScreenProps {
+  navigation: TrackingScreenNavigationProp;
+}
+
+interface RouteCoordinate {
+  latitude: number;
+  longitude: number;
+}
+
+interface HikeStats {
+  distance: number;
+  duration: number;
+  pace: number;
+  elevation: number;
+  currentSpeed: number;
+}
+
+type SyncStatus = 'checking' | 'ready' | 'local-only' | 'offline';
+
+export default function TrackingScreen({ navigation }: TrackingScreenProps) {
+  const [tracking, setTracking] = useState<boolean>(false);
+  const [paused, setPaused] = useState<boolean>(false);
+  const [currentLocation, setCurrentLocation] = useState<Location.LocationObjectCoords | null>(null);
+  const [routeCoordinates, setRouteCoordinates] = useState<RouteCoordinate[]>([]);
+  const [stats, setStats] = useState<HikeStats>({
     distance: 0,       // in meters
     duration: 0,       // in seconds
     pace: 0,           // in minutes per km
     elevation: 0,      // in meters
     currentSpeed: 0,   // in m/s
   });
-  const [saveModalVisible, setSaveModalVisible] = useState(false);
-  const [isConnected, setIsConnected] = useState(true);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [syncStatus, setSyncStatus] = useState('checking'); // 'ready', 'local-only', 'offline', 'checking'
+  const [saveModalVisible, setSaveModalVisible] = useState<boolean>(false);
+  const [isConnected, setIsConnected] = useState<boolean>(true);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('checking');
   
-  const mapRef = useRef(null)
-  const locationSubscription = useRef(null)
-  const timerRef = useRef(null)
-  const startTimeRef = useRef(null)
-  const pausedTimeRef = useRef(0)  // For tracking total paused time
-  const pauseStartTimeRef = useRef(null) // When pause started
-  const initialAltitudeRef = useRef(null)
-  const prevCoordinatesRef = useRef([])
-  const lastValidDistanceRef = useRef(0) // To prevent erroneous distance jumps
-  const lastStatsRef = useRef({}) // Store stats at pause time
-  const paceReadingsRef = useRef([]);  // To store last 5 pace readings for smoothing
+  const mapRef = useRef<MapView>(null);
+  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+  const pausedTimeRef = useRef<number>(0);  // For tracking total paused time
+  const pauseStartTimeRef = useRef<number | null>(null); // When pause started
+  const initialAltitudeRef = useRef<number | null>(null);
+  const prevCoordinatesRef = useRef<RouteCoordinate[]>([]);
+  const lastValidDistanceRef = useRef<number>(0); // To prevent erroneous distance jumps
+  const lastStatsRef = useRef<HikeStats>({} as HikeStats); // Store stats at pause time
+  const paceReadingsRef = useRef<number[]>([]);  // To store last 5 pace readings for smoothing
 
   const MIN_SPEED_THRESHOLD = 0.5;     // Minimum speed in m/s to consider for pace calculation
 
@@ -63,8 +88,7 @@ export default function TrackingScreen({ navigation }) {
       // Get initial location with more retries
       try {
         const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Highest,
-          timeout: 15000, // 15 second timeout
+          accuracy: Location.Accuracy.High,
         });
         
         setCurrentLocation(location.coords);
@@ -84,13 +108,14 @@ export default function TrackingScreen({ navigation }) {
     
     // Subscribe to network state updates
     const unsubscribe = NetInfo.addEventListener(state => {
-      setIsConnected(state.isConnected);
-      updateSyncStatus(state.isConnected);
+      const isConnected = state.isConnected ?? false;
+      setIsConnected(isConnected);
+      updateSyncStatus(isConnected);
     });
     
     // Check initial connection status
     NetInfo.fetch().then(state => {
-      setIsConnected(state.isConnected);
+      setIsConnected(state.isConnected ?? false);
     });
     
     // Check login status
@@ -109,7 +134,7 @@ export default function TrackingScreen({ navigation }) {
   }, []);
   
   // Check if user is logged in
-  const checkLoginStatus = async () => {
+  const checkLoginStatus = async (): Promise<void> => {
     try {
       const loggedIn = await isUserLoggedIn();
       setIsLoggedIn(loggedIn);
@@ -122,7 +147,7 @@ export default function TrackingScreen({ navigation }) {
   };
   
   // Update sync status based on connection and login
-  const updateSyncStatus = (connected, loggedIn = isLoggedIn) => {
+  const updateSyncStatus = (connected: boolean, loggedIn: boolean = isLoggedIn): void => {
     if (!connected) {
       setSyncStatus('offline');
     } else if (!loggedIn) {
@@ -132,7 +157,7 @@ export default function TrackingScreen({ navigation }) {
     }
   };
 
-  const startTracking = async () => {
+  const startTracking = async (): Promise<void> => {
     try {
       if (!currentLocation) {
         Alert.alert('Error', 'Cannot start tracking without location. Please wait for GPS signal.');
@@ -180,7 +205,7 @@ export default function TrackingScreen({ navigation }) {
     }
   };
 
-  const startLocationTracking = async () => {
+  const startLocationTracking = async (): Promise<void> => {
     // Remove any existing subscription first
     if (locationSubscription.current) {
       locationSubscription.current.remove();
@@ -223,7 +248,9 @@ export default function TrackingScreen({ navigation }) {
             
             setStats(prevStats => {
               const newTotalDistance = lastValidDistanceRef.current;
-              const newDuration = (new Date().getTime() - startTimeRef.current - pausedTimeRef.current) / 1000;
+              const newDuration = startTimeRef.current 
+                ? (new Date().getTime() - startTimeRef.current - pausedTimeRef.current) / 1000
+                : 0;
               
               // Calculate pace only if we have meaningful distance and duration
               let newPace = 0;
@@ -232,7 +259,7 @@ export default function TrackingScreen({ navigation }) {
                 const rawPace = (newDuration / 60) / (newDistance / 1000);
                 
                 // Don't include extremely slow paces (likely standing still or very slow walking)
-                if (speed > MIN_SPEED_THRESHOLD) {
+                if (speed && speed > MIN_SPEED_THRESHOLD) {
                   // Add to rolling average if it's a reasonable value
                   if (rawPace > 3 && rawPace < 30) {  // Between 3-30 min/km is reasonable
                     paceReadingsRef.current.push(rawPace);
@@ -254,6 +281,12 @@ export default function TrackingScreen({ navigation }) {
                 // Cap extremely fast or slow paces to reasonable values
                 newPace = Math.max(3, Math.min(newPace, 30));
               }
+              
+              // Calculate elevation change
+              const currentAltitude = location.coords.altitude || 0;
+              const elevationChange = initialAltitudeRef.current 
+                ? Math.max(0, currentAltitude - initialAltitudeRef.current)
+                : 0;
               
               const newStats = {
                 distance: newTotalDistance,
@@ -287,7 +320,7 @@ export default function TrackingScreen({ navigation }) {
     );
   };
 
-  const startTimer = () => {
+  const startTimer = (): void => {
     // Clear existing timer if any
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -297,7 +330,9 @@ export default function TrackingScreen({ navigation }) {
       if (paused) return; // Don't update if paused
       
       const currentTime = new Date().getTime();
-      const elapsedSeconds = (currentTime - startTimeRef.current - pausedTimeRef.current) / 1000;
+      const elapsedSeconds = startTimeRef.current 
+        ? (currentTime - startTimeRef.current - pausedTimeRef.current) / 1000
+        : 0;
       
       setStats(prevStats => {
         // Don't recalculate pace here - use the value from location tracking
@@ -316,13 +351,15 @@ export default function TrackingScreen({ navigation }) {
     }, 1000);
   };
 
-  const pauseTracking = () => {
+  const pauseTracking = (): void => {
     if (paused) {
       // Resume tracking
       console.log('Resuming tracking');
       
       // Calculate how long we were paused and add to total pause time
-      const pauseDuration = new Date().getTime() - pauseStartTimeRef.current;
+      const pauseDuration = pauseStartTimeRef.current 
+        ? new Date().getTime() - pauseStartTimeRef.current
+        : 0;
       pausedTimeRef.current += pauseDuration;
       
       // Restart location tracking and timer
@@ -355,7 +392,7 @@ export default function TrackingScreen({ navigation }) {
     }
   };
 
-  const stopTracking = () => {
+  const stopTracking = (): void => {
     // Clean up all tracking resources
     if (locationSubscription.current) {
       locationSubscription.current.remove();
@@ -375,7 +412,7 @@ export default function TrackingScreen({ navigation }) {
   };
 
   // Modify the handleSaveHike function to ensure coordinates are properly formatted
-  const handleSaveHike = async () => {
+  const handleSaveHike = async (): Promise<void> => {
     try {
       // Make validation less restrictive - allow saving even with minimal data
       if (!routeCoordinates || routeCoordinates.length < 1) {
@@ -418,8 +455,8 @@ export default function TrackingScreen({ navigation }) {
           pace: stats.pace || 0,
           elevation: stats.elevation || 0
         },
-        date: new Date().toISOString(),
-        syncReady: syncStatus === 'ready'
+        // date: new Date().toISOString(), // Remove this as it's not part of the expected type
+        // syncReady: syncStatus === 'ready' // Remove this property as it's not part of the expected type
       });
       
       // Close the modal
@@ -430,15 +467,15 @@ export default function TrackingScreen({ navigation }) {
     }
   };
 
-  const handleDiscardHike = () => {
+  const handleDiscardHike = (): void => {
     setSaveModalVisible(false);
     navigation.goBack();
   };
 
   // Replace your calculateDistance function with this more accurate version
-  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
     // More accurate Earth radius calculation based on latitude
-    const getEarthRadius = (lat) => {
+    const getEarthRadius = (lat: number): number => {
       // Earth is not a perfect sphere - radius varies by latitude
       const equatorialRadius = 6378137.0; // Earth radius at equator in meters
       const polarRadius = 6356752.3; // Earth radius at poles in meters
@@ -473,7 +510,7 @@ export default function TrackingScreen({ navigation }) {
     return distance; // in meters
   };
 
-  const renderStatsSection = () => {
+  const renderStatsSection = (): JSX.Element => {
     return (
       <View style={styles.statsSection}>
         <HikeStats stats={stats} />
@@ -482,7 +519,7 @@ export default function TrackingScreen({ navigation }) {
   };
 
   // Render sync status indicator in the modal
-  const renderSyncStatus = () => {
+  const renderSyncStatus = (): JSX.Element => {
     if (syncStatus === 'checking') {
       return (
         <View style={styles.syncStatusContainer}>
@@ -1183,5 +1220,12 @@ const styles = StyleSheet.create({
   },
   localOnlyIndicator: {
     backgroundColor: 'rgba(255, 160, 0, 0.9)', // Amber with transparency
+  },
+  statsSection: {
+    backgroundColor: 'white',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E5E0',
   },
 })

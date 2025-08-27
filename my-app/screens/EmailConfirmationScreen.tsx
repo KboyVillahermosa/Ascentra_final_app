@@ -10,18 +10,29 @@ import {
   StatusBar,
   Image
 } from 'react-native';
-import { supabase } from '../utils/supabase';
+import { supabase } from '../services/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { RouteProp } from '@react-navigation/native';
+import { RootStackParamList } from '../App';
 
-export default function EmailConfirmationScreen({ navigation, route }) {
+type EmailConfirmationScreenNavigationProp = StackNavigationProp<RootStackParamList, 'EmailConfirmation'>;
+type EmailConfirmationScreenRouteProp = RouteProp<RootStackParamList, 'EmailConfirmation'>;
+
+interface EmailConfirmationScreenProps {
+  navigation: EmailConfirmationScreenNavigationProp;
+  route: EmailConfirmationScreenRouteProp;
+}
+
+export default function EmailConfirmationScreen({ navigation, route }: EmailConfirmationScreenProps) {
   const { email } = route.params || {};
-  const [loading, setLoading] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(false);
-  const [cooldownTime, setCooldownTime] = useState(0);
-  const cooldownTimerRef = useRef(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [resendCooldown, setResendCooldown] = useState<boolean>(false);
+  const [cooldownTime, setCooldownTime] = useState<number>(0);
+  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Function to resend verification email
-  async function resendVerificationEmail() {
+  async function resendVerificationEmail(): Promise<void> {
     if (resendCooldown) {
       Alert.alert(
         'Please Wait',
@@ -57,7 +68,9 @@ export default function EmailConfirmationScreen({ navigation, route }) {
       cooldownTimerRef.current = setInterval(() => {
         setCooldownTime((prevTime) => {
           if (prevTime <= 1) {
-            clearInterval(cooldownTimerRef.current);
+            if (cooldownTimerRef.current) {
+              clearInterval(cooldownTimerRef.current);
+            }
             setResendCooldown(false);
             return 0;
           }

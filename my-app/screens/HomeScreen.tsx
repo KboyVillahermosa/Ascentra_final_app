@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { 
   StyleSheet, 
   View, 
@@ -18,7 +18,7 @@ import {
   FlatList,
   KeyboardAvoidingView
 } from 'react-native'
-import { supabase } from '../utils/supabase'
+import { supabase } from '../services/supabaseClient'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons'
 import TrackScreen from './TrackScreen'
@@ -26,21 +26,46 @@ import ForumPost from './ForumPost'
 import { formatDate, formatDistance, formatDuration } from '../utils/formatters'
 import { getAllHikes } from '../services/databaseService'
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps'
-import { CommonActions } from '@react-navigation/native';
+import { CommonActions } from '@react-navigation/native'
+import { User } from '@supabase/supabase-js'
+import { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { RootStackParamList } from '../App'
+
+type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
+interface HikingSpot {
+  id: string;
+  name: string;
+  description: string;
+  location: string;
+  image_url: string;
+  average_rating: number;
+  rating_count: number;
+}
+
+interface HikingSpotCardProps {
+  spot: HikingSpot;
+  navigation: HomeScreenNavigationProp;
+}
+
+interface HomeContentProps {
+  navigation: HomeScreenNavigationProp;
+  user: User | null;
+}
 
 const Tab = createBottomTabNavigator()
 const { width } = Dimensions.get('window');
 
-function HikingSpotCard({ spot, navigation }) {
+function HikingSpotCard({ spot, navigation }: HikingSpotCardProps) {
   // Map database paths to corresponding image requires
-  const getImageSource = (path) => {
+  const getImageSource = (path: string) => {
     // Check if it's already a valid URL
     if (path && (path.startsWith('http://') || path.startsWith('https://'))) {
       return { uri: path };
     }
     
     // Map relative paths to actual image requires
-    const imageMap = {
+    const imageMap: { [key: string]: any } = {
       '../assets/images/spot1.jpg': require('../assets/images/spot1.jpg'),
       '../assets/images/spot2.jpg': require('../assets/images/spot2.jpg'),
       '../assets/images/spot3.jpg': require('../assets/images/spot3.jpg'),
@@ -66,7 +91,7 @@ function HikingSpotCard({ spot, navigation }) {
   return (
     <TouchableOpacity 
       style={styles.card}
-      onPress={() => navigation.navigate('HikingSpotDetails', { spotId: spot.id })}
+      onPress={() => navigation.navigate('HikingSpotDetails', { spot: spot })}
       activeOpacity={0.9}
     >
       <Image 
@@ -122,16 +147,16 @@ function HikingSpotCard({ spot, navigation }) {
   )
 }
 
-function HomeContent({ navigation, user }) {
-  const [hikingSpots, setHikingSpots] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+function HomeContent({ navigation, user }: HomeContentProps) {
+  const [hikingSpots, setHikingSpots] = useState<HikingSpot[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [refreshing, setRefreshing] = useState<boolean>(false)
 
   useEffect(() => {
     fetchHikingSpots()
   }, [])
 
-  async function fetchHikingSpots() {
+  async function fetchHikingSpots(): Promise<void> {
     try {
       setLoading(true)
       
@@ -156,7 +181,7 @@ function HomeContent({ navigation, user }) {
       
       setHikingSpots(data || [])
     } catch (error) {
-      console.error('Error fetching hiking spots:', error.message);
+      console.error('Error fetching hiking spots:', error instanceof Error ? error.message : error);
       Alert.alert('Connection Error', 
         'Unable to connect to the server. Please check your internet connection or try again later.'
       );
@@ -166,7 +191,7 @@ function HomeContent({ navigation, user }) {
     }
   }
 
-  const onRefresh = () => {
+  const onRefresh = (): void => {
     setRefreshing(true)
     fetchHikingSpots()
   }
@@ -247,29 +272,29 @@ function HomeContent({ navigation, user }) {
   )
 }
 
-function ProfileScreen({ user, profile, signOut, navigation, route }) {
-  const [avatarUrl, setAvatarUrl] = useState(null);
-  const [bio, setBio] = useState('');
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [hikeRecords, setHikeRecords] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
-  const [mediaItems, setMediaItems] = useState([]);
-  const [initialMediaIndex, setInitialMediaIndex] = useState(0);
+function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
+  const [avatarUrl, setAvatarUrl] = useState<any>(null);
+  const [bio, setBio] = useState<string>('');
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [hikeRecords, setHikeRecords] = useState<any[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [mediaViewerVisible, setMediaViewerVisible] = useState<boolean>(false);
+  const [mediaItems, setMediaItems] = useState<any[]>([]);
+  const [initialMediaIndex, setInitialMediaIndex] = useState<number>(0);
   
   // New state for comments
-  const [commentModalVisible, setCommentModalVisible] = useState(false);
-  const [selectedActivity, setSelectedActivity] = useState(null);
-  const [comments, setComments] = useState([]);
-  const [newComment, setNewComment] = useState('');
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [submittingComment, setSubmittingComment] = useState(false);
+  const [commentModalVisible, setCommentModalVisible] = useState<boolean>(false);
+  const [selectedActivity, setSelectedActivity] = useState<any>(null);
+  const [comments, setComments] = useState<any[]>([]);
+  const [newComment, setNewComment] = useState<string>('');
+  const [loadingComments, setLoadingComments] = useState<boolean>(false);
+  const [submittingComment, setSubmittingComment] = useState<boolean>(false);
   
   // Add state to track if we're viewing another user's profile
-  const [viewingUserId, setViewingUserId] = useState(null);
-  const [viewingUserProfile, setViewingUserProfile] = useState(null);
-  const [isOwnProfile, setIsOwnProfile] = useState(true);
+  const [viewingUserId, setViewingUserId] = useState<any>(null);
+  const [viewingUserProfile, setViewingUserProfile] = useState<any>(null);
+  const [isOwnProfile, setIsOwnProfile] = useState<boolean>(true);
   
   const { width } = Dimensions.get('window');
   const CARD_WIDTH = width - 32;
@@ -312,12 +337,12 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
         setAvatarUrl(data.avatar_url);
       }
     } catch (error) {
-      console.error('Error:', error.message);
+      console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
     }
   }
 
   // Function to fetch another user's profile
-  async function fetchUserProfile(userId) {
+  async function fetchUserProfile(userId: any) {
     try {
       setLoading(true);
       
@@ -338,7 +363,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
         setAvatarUrl(data.avatar_url);
       }
     } catch (error) {
-      console.error('Error:', error.message);
+      console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -353,7 +378,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
       
       // Sort by date (newest first)
       const sortedHikes = hikes.sort((a, b) => {
-        return new Date(b.date) - new Date(a.date);
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
       });
       
       // Only show recent 3 hikes in profile
@@ -400,7 +425,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
   }
 
   // Function to fetch another user's hike records
-  async function fetchUserHikeRecords(userId) {
+  async function fetchUserHikeRecords(userId: any) {
     try {
       setLoading(true);
       
@@ -464,7 +489,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
   }
 
   // New function to toggle like on activity
-  const toggleLike = async (activityId) => {
+  const toggleLike = async (activityId: any) => {
     if (!user) {
       Alert.alert('Login Required', 'Please log in to like activities');
       return;
@@ -540,7 +565,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
   };
 
   // New function to open comments modal
-  const openComments = async (activityId, activityTitle) => {
+  const openComments = async (activityId: any, activityTitle: any) => {
     if (!user) {
       Alert.alert('Login Required', 'Please log in to view and add comments');
       return;
@@ -552,7 +577,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
   };
   
   // New function to fetch comments for an activity
-  const fetchComments = async (activityId) => {
+  const fetchComments = async (activityId: any) => {
     try {
       setLoadingComments(true);
       
@@ -620,7 +645,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
   };
 
   // New function to delete a comment
-  const deleteComment = async (commentId) => {
+  const deleteComment = async (commentId: any) => {
     try {
       const { error } = await supabase
         .from('activity_comments')
@@ -652,14 +677,14 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
   };
 
   // Functions for media viewer
-  const handleMediaPress = (media, index) => {
+  const handleMediaPress = (media: any, index: any) => {
     setMediaItems(media);
     setInitialMediaIndex(index);
     setMediaViewerVisible(true);
   };
 
   // HikeHistoryItem component (updated)
-  const HikeHistoryItem = ({ hike, onPress, onMediaPress, onLike, onComment, isOwnProfile }) => {
+  const HikeHistoryItem = ({ hike, onPress, onMediaPress, onLike, onComment, isOwnProfile }: any) => {
     // Check if the hike has media files and route coordinates
     const hasMedia = hike.media && Array.isArray(hike.media) && hike.media.length > 0;
     const hasRoute = hike.routeCoordinates && Array.isArray(hike.routeCoordinates) && hike.routeCoordinates.length > 1;
@@ -679,7 +704,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
       let minLng = hike.routeCoordinates[0].longitude;
       let maxLng = hike.routeCoordinates[0].longitude;
       
-      hike.routeCoordinates.forEach(coord => {
+      hike.routeCoordinates.forEach((coord: any) => {
         minLat = Math.min(minLat, coord.latitude);
         maxLat = Math.max(maxLat, coord.latitude);
         minLng = Math.min(minLng, coord.longitude);
@@ -1279,9 +1304,9 @@ function ProfileScreen({ user, profile, signOut, navigation, route }) {
   );
 }
 
-export default function HomeScreen({ navigation }) {
-  const [user, setUser] = useState(null)
-  const [profile, setProfile] = useState(null)
+export default function HomeScreen({ navigation }: any) {
+  const [user, setUser] = useState<any>(null)
+  const [profile, setProfile] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -1294,7 +1319,7 @@ export default function HomeScreen({ navigation }) {
       const { data: { user } } = await supabase.auth.getUser()
       
       if (user) {
-        setUser(user)
+        setUser(user as any)
         
         // Fetch user profile
         const { data, error } = await supabase
@@ -1304,10 +1329,10 @@ export default function HomeScreen({ navigation }) {
           .single()
           
         if (error) throw error
-        setProfile(data)
+        setProfile(data as any)
       }
     } catch (error) {
-      alert(error.message)
+      Alert.alert('Error', error instanceof Error ? error.message : 'Unknown error')
     } finally {
       setLoading(false)
     }
@@ -1319,12 +1344,12 @@ export default function HomeScreen({ navigation }) {
       if (error) throw error
       navigation.navigate('Login')
     } catch (error) {
-      alert(error.message)
+      Alert.alert('Error', error instanceof Error ? error.message : 'Unknown error')
     }
   }
 
   // Navigation to view other user profiles
-  const navigateToUserProfile = (userId) => {
+  const navigateToUserProfile = (userId: string) => {
     navigation.navigate('Profile', { userId });
   };
 
@@ -1968,16 +1993,6 @@ const styles = StyleSheet.create({
     borderTopColor: '#F0F0F0',
     paddingVertical: 10,
     paddingHorizontal: 15,
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   statValue: {
     fontSize: 14,
