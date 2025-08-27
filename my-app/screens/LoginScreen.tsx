@@ -108,7 +108,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps): JSX.Eleme
             style={styles.headerGradient}
           >
             <View style={styles.headerContent}>
-              <Text style={styles.headerText}>Welcome to</Text>
+              <Text style={styles.headerText}>Welcome To</Text>
               <Text style={styles.headerTitle}>Ascentra</Text>
             </View>
           </LinearGradient>
