@@ -1,11 +1,13 @@
 # 🚀 Quick Setup Guide - Fix Registration Error
 
 ## Current Issue
+
 Your registration is failing because the Supabase URL in `.env` points to a non-existent project.
 
 ## ⚡ Quick Fix (5 minutes)
 
 ### Step 1: Create Supabase Project
+
 1. **Go to**: https://supabase.com
 2. **Sign in/up** with GitHub, Google, or email
 3. **Click**: "New Project"
@@ -17,22 +19,27 @@ Your registration is failing because the Supabase URL in `.env` points to a non-
 6. **Wait**: 2-3 minutes for setup
 
 ### Step 2: Get Your Credentials
+
 1. **Go to**: Settings → API (in left sidebar)
 2. **Copy these two values**:
    - **Project URL** (starts with `https://`)
    - **anon public** key (long string starting with `eyJ`)
 
 ### Step 3: Update Your .env File
+
 1. **Open**: `.env` file in your project
 2. **Replace** the current content with:
+
 ```env
 # Supabase Configuration
 EXPO_PUBLIC_SUPABASE_URL=YOUR_PROJECT_URL_HERE
 EXPO_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY_HERE
 ```
+
 3. **Paste** your actual values (no quotes, no extra spaces)
 
 ### Step 4: Deploy Database Schema
+
 1. **In Supabase Dashboard**: Go to SQL Editor
 2. **Click**: "New Query"
 3. **Copy & Paste**: The entire content from `deploy_schema.sql`
@@ -40,6 +47,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY_HERE
 5. **Wait**: for "Database schema deployed successfully!" message
 
 ### Step 5: Test the Fix
+
 1. **Stop** your development server (Ctrl+C)
 2. **Run**: `npm start`
 3. **Try registration** again
@@ -60,6 +68,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY_HERE
 ## 🔧 Troubleshooting
 
 **Still getting errors?**
+
 1. Check browser console for specific error messages
 2. Verify Supabase project is active (not paused)
 3. Double-check URL and key are copied correctly

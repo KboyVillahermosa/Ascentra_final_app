@@ -37,6 +37,8 @@ CREATE TABLE profiles (
     location TEXT,
     phone TEXT,
     date_of_birth DATE,
+    skill_level TEXT DEFAULT 'rookie_rambler',
+    total_km_traveled DECIMAL(10,2) DEFAULT 0.0,
     privacy_settings JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -150,6 +152,7 @@ CREATE TABLE forum_posts (
     content TEXT NOT NULL,
     category TEXT DEFAULT 'General',
     tags TEXT[] DEFAULT '{}',
+    visibility TEXT DEFAULT 'public' CHECK (visibility IN ('public', 'private')),
     is_pinned BOOLEAN DEFAULT false,
     is_locked BOOLEAN DEFAULT false,
     view_count INTEGER DEFAULT 0,
@@ -445,7 +448,7 @@ CREATE POLICY "Public profiles are viewable by everyone" ON profiles
     FOR SELECT USING (true);
 
 CREATE POLICY "Users can insert their own profile" ON profiles
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+    FOR INSERT WITH CHECK (auth.uid() = user_id OR auth.uid() IS NOT NULL);
 
 CREATE POLICY "Users can update their own profile" ON profiles
     FOR UPDATE USING (auth.uid() = user_id);

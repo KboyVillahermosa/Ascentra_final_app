@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  ScrollView, 
-  TextInput, 
-  TouchableOpacity, 
-  ActivityIndicator, 
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
   Alert,
   SafeAreaView,
   RefreshControl,
@@ -16,9 +16,10 @@ import {
   Platform,
   Modal,
   Dimensions,
-  Pressable
+  Pressable,
+  Share,
 } from 'react-native';
-import { supabase, uploadFileToSupabase } from '../services/supabaseClient';
+import { supabase } from '../services/supabaseClient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -26,6 +27,7 @@ import { Video } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import uuid from 'react-native-uuid';
+import { decode } from 'base-64';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -36,19 +38,22 @@ export default function ForumPost() {
   const [uploading, setUploading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [user, setUser] = useState(null);
-  
+
   // Media states
   const [mediaFiles, setMediaFiles] = useState([]);
   const [mediaOptionsVisible, setMediaOptionsVisible] = useState(false);
   const videoRef = useRef(null);
   const [playingVideoId, setPlayingVideoId] = useState(null);
-  
+
+  // Post visibility state
+  const [postVisibility, setPostVisibility] = useState('public');
+
   // New state for fullscreen media viewer
   const [fullscreenMedia, setFullscreenMedia] = useState(null);
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
   const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
   const [currentMediaList, setCurrentMediaList] = useState([]);
-  
+
   // New states for comments and likes
   const [commentText, setCommentText] = useState('');
   const [activeCommentPostId, setActiveCommentPostId] = useState(null);
@@ -60,7 +65,7 @@ export default function ForumPost() {
   const [userLikedPosts, setUserLikedPosts] = useState({});
   const [submittingComment, setSubmittingComment] = useState(false);
   const [submittingLike, setSubmittingLike] = useState(false);
-  
+
   // Get current user on component mount
   useEffect(() => {
     getUser();
@@ -70,7 +75,9 @@ export default function ForumPost() {
   // Get current authenticated user
   async function getUser() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       setUser(user);
     } catch (error) {
       console.error('Error getting user:', error);
@@ -81,36 +88,45 @@ export default function ForumPost() {
   async function fetchPosts() {
     try {
       setLoading(true);
-      
-      // Get all posts
+
+      // Get only public posts for forum display
       const { data: postsData, error: postsError } = await supabase
         .from('forum_posts')
-        .select(`
+        .select(
+          `
           id,
           content,
           title,
           created_at,
-          user_id
-        `)
+          user_id,
+          visibility
+        `,
+        )
+        .eq('visibility', 'public')
         .order('created_at', { ascending: false });
-      
-      if (postsError) throw postsError;
-      
+
+      if (postsError) {
+        throw postsError;
+      }
+
       if (!postsData || postsData.length === 0) {
         setPosts([]);
         return;
       }
-      
+
       // Get all post media
       const { data: mediaData, error: mediaError } = await supabase
         .from('forum_post_media')
         .select('*')
-        .in('post_id', postsData.map(post => post.id));
-        
+        .in(
+          'post_id',
+          postsData.map(post => post.id),
+        );
+
       if (mediaError) {
         console.error('Error fetching post media:', mediaError);
       }
-      
+
       // Group media by post_id
       const mediaByPost = {};
       if (mediaData) {
@@ -121,20 +137,20 @@ export default function ForumPost() {
           mediaByPost[media.post_id].push(media);
         });
       }
-      
+
       // Extract all unique user IDs from posts
       const userIds = [...new Set(postsData.map(post => post.user_id))];
-      
+
       // Get all profiles for these users in a single query
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('id, username, avatar_url')
         .in('id', userIds);
-      
+
       if (profilesError) {
         console.error('Error fetching profiles:', profilesError);
       }
-      
+
       // Create a map of user IDs to profiles for quick lookup
       const profilesMap = {};
       if (profilesData) {
@@ -142,17 +158,20 @@ export default function ForumPost() {
           profilesMap[profile.id] = profile;
         });
       }
-      
+
       // Fetch like counts for all posts
       const { data: likeData, error: likeError } = await supabase
         .from('forum_likes')
         .select('post_id, id')
-        .in('post_id', postsData.map(post => post.id));
-        
+        .in(
+          'post_id',
+          postsData.map(post => post.id),
+        );
+
       if (likeError) {
         console.error('Error fetching likes:', likeError);
       }
-      
+
       // Count likes by post
       const likesByPost = {};
       if (likeData) {
@@ -164,19 +183,22 @@ export default function ForumPost() {
         });
       }
       setLikeCounts(likesByPost);
-      
+
       // Check which posts the current user has liked
       if (user) {
         const { data: userLikes, error: userLikesError } = await supabase
           .from('forum_likes')
           .select('post_id')
           .eq('user_id', user.id)
-          .in('post_id', postsData.map(post => post.id));
-          
+          .in(
+            'post_id',
+            postsData.map(post => post.id),
+          );
+
         if (userLikesError) {
           console.error('Error fetching user likes:', userLikesError);
         }
-        
+
         const userLikedPostsMap = {};
         if (userLikes) {
           userLikes.forEach(like => {
@@ -185,17 +207,21 @@ export default function ForumPost() {
         }
         setUserLikedPosts(userLikedPostsMap);
       }
-      
+
       // Fetch comment counts for all posts
-      const { data: commentCountData, error: commentCountError } = await supabase
-        .from('forum_comments')
-        .select('post_id, id')
-        .in('post_id', postsData.map(post => post.id));
-        
+      const { data: commentCountData, error: commentCountError } =
+        await supabase
+          .from('forum_comments')
+          .select('post_id, id')
+          .in(
+            'post_id',
+            postsData.map(post => post.id),
+          );
+
       if (commentCountError) {
         console.error('Error fetching comment counts:', commentCountError);
       }
-      
+
       // Count comments by post
       const commentsByPost = {};
       if (commentCountData) {
@@ -207,18 +233,21 @@ export default function ForumPost() {
         });
       }
       setCommentCounts(commentsByPost);
-      
+
       // Attach profile data and media to each post
       const postsWithData = postsData.map(post => ({
         ...post,
         profiles: profilesMap[post.user_id] || null,
-        media: mediaByPost[post.id] || []
+        media: mediaByPost[post.id] || [],
       }));
-      
+
       setPosts(postsWithData);
     } catch (error) {
       console.error('Error fetching forum posts:', error);
-      Alert.alert('Error', 'Failed to load forum posts. Please try again later.');
+      Alert.alert(
+        'Error',
+        'Failed to load forum posts. Please try again later.',
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -226,16 +255,20 @@ export default function ForumPost() {
   }
 
   // Add this helper function at the top of your component
-  const getMediaTypeOption = (type) => {
+  const getMediaTypeOption = type => {
     // Try different API versions
     try {
       // Check if MediaType exists (newer API)
       if (ImagePicker.MediaType) {
-        return type === 'image' ? ImagePicker.MediaType.Images : ImagePicker.MediaType.Videos;
+        return type === 'image'
+          ? ImagePicker.MediaType.Images
+          : ImagePicker.MediaType.Videos;
       }
       // Try MediaTypeOptions (older API)
       else if (ImagePicker.MediaTypeOptions) {
-        return type === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos;
+        return type === 'image'
+          ? ImagePicker.MediaTypeOptions.Images
+          : ImagePicker.MediaTypeOptions.Videos;
       }
       // Fallback to string values (safest option)
       return type === 'image' ? 'images' : 'videos';
@@ -248,10 +281,10 @@ export default function ForumPost() {
   // Pick image from gallery
   async function pickImage() {
     setMediaOptionsVisible(false);
-    
+
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images", // Use string instead of enum
+        mediaTypes: 'images', // Use string instead of enum
         allowsEditing: true,
         quality: 0.7,
         base64: false,
@@ -260,19 +293,25 @@ export default function ForumPost() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         // Check if we already have maximum media files
         if (mediaFiles.length >= 5) {
-          Alert.alert("Limit Reached", "You can only attach up to 5 media files per post.");
+          Alert.alert(
+            'Limit Reached',
+            'You can only attach up to 5 media files per post.',
+          );
           return;
         }
-        
+
         const asset = result.assets[0];
-        
+
         // Add to media files - skip manipulation for now
-        setMediaFiles([...mediaFiles, {
-          uri: asset.uri,
-          type: 'image',
-          name: `image-${Date.now()}.jpg`,
-          tempId: uuid.v4()
-        }]);
+        setMediaFiles([
+          ...mediaFiles,
+          {
+            uri: asset.uri,
+            type: 'image',
+            name: `image-${Date.now()}.jpg`,
+            tempId: uuid.v4(),
+          },
+        ]);
       }
     } catch (error) {
       console.error('Error picking image:', error);
@@ -283,7 +322,7 @@ export default function ForumPost() {
   // Pick video from gallery
   async function pickVideo() {
     setMediaOptionsVisible(false);
-    
+
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: getMediaTypeOption('video'),
@@ -295,26 +334,32 @@ export default function ForumPost() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         // Check if we already have maximum media files
         if (mediaFiles.length >= 5) {
-          Alert.alert("Limit Reached", "You can only attach up to 5 media files per post.");
+          Alert.alert(
+            'Limit Reached',
+            'You can only attach up to 5 media files per post.',
+          );
           return;
         }
-        
+
         const asset = result.assets[0];
-        
+
         // Generate thumbnail for video
         const { uri: thumbnailUri } = await VideoThumbnails.getThumbnailAsync(
           asset.uri,
-          { time: 1000 }
+          { time: 1000 },
         );
-        
+
         // Add to media files
-        setMediaFiles([...mediaFiles, {
-          uri: asset.uri,
-          type: 'video',
-          thumbnail: thumbnailUri,
-          name: `video-${Date.now()}.mp4`,
-          tempId: uuid.v4()
-        }]);
+        setMediaFiles([
+          ...mediaFiles,
+          {
+            uri: asset.uri,
+            type: 'video',
+            thumbnail: thumbnailUri,
+            name: `video-${Date.now()}.mp4`,
+            tempId: uuid.v4(),
+          },
+        ]);
       }
     } catch (error) {
       console.error('Error picking video:', error);
@@ -329,51 +374,65 @@ export default function ForumPost() {
 
   // Upload media files to Supabase Storage
   async function uploadMediaFiles(postId) {
-    if (mediaFiles.length === 0) return [];
-    
+    if (mediaFiles.length === 0) {
+      return [];
+    }
+
     const uploadedMedia = [];
-    
+
     for (const media of mediaFiles) {
       try {
-        console.log(`Processing ${media.type} file...`);
-        
         // Generate unique filename
         const timestamp = Date.now();
         const randomId = Math.random().toString(36).substring(2, 10);
         const fileExt = media.uri.split('.').pop();
         const fileName = `${timestamp}_${randomId}.${fileExt}`;
         const filePath = `${user.id}/${fileName}`;
-        
+
         let fileToUpload = media.uri;
-        let contentType = media.type === 'image' ? 'image/jpeg' : 'video/mp4';
-        
+        const contentType = media.type === 'image' ? 'image/jpeg' : 'video/mp4';
+
         // For images, we'll create a copy to ensure the file is accessible
         if (media.type === 'image') {
           try {
-            console.log('Preparing image file...');
             // Copy the image to a known location with a simple name
-            const newPath = FileSystem.documentDirectory + `temp_image_${randomId}.jpg`;
+            const newPath =
+              FileSystem.documentDirectory + `temp_image_${randomId}.jpg`;
             await FileSystem.copyAsync({
               from: media.uri,
-              to: newPath
+              to: newPath,
             });
             fileToUpload = newPath;
-            console.log('Image prepared at:', fileToUpload);
           } catch (copyError) {
-            console.log('File preparation failed, using original:', copyError);
+            console.warn('Error copying file:', copyError);
           }
         }
-        
-        // Upload the file
-        console.log(`Uploading ${media.type} to path: ${filePath}`);
-        const { url: mediaUrl } = await uploadFileToSupabase(
-          'forum', 
-          filePath, 
-          fileToUpload,
-          contentType
-        );
-        console.log('Upload successful, URL:', mediaUrl);
-        
+
+        // Read file as base64
+        const base64 = await FileSystem.readAsStringAsync(fileToUpload, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        // Upload the file to Supabase Storage
+
+        const { data, error } = await supabase.storage
+          .from('forum')
+          .upload(filePath, decode(base64), {
+            contentType: contentType,
+            upsert: true,
+          });
+
+        if (error) {
+          throw error;
+        }
+
+        // Get the public URL
+        const { data: urlData } = supabase.storage
+          .from('forum')
+          .getPublicUrl(filePath);
+
+        const mediaUrl = urlData?.publicUrl;
+
         // Handle thumbnail for videos
         let thumbnailUrl = null;
         if (media.type === 'video' && media.thumbnail) {
@@ -381,40 +440,61 @@ export default function ForumPost() {
           const thumbId = Math.random().toString(36).substring(2, 10);
           const thumbnailName = `thumb_${thumbTimestamp}_${thumbId}.jpg`;
           const thumbnailPath = `${user.id}/${thumbnailName}`;
-          
+
           // Copy thumbnail to known location
-          const thumbNewPath = FileSystem.documentDirectory + `temp_thumb_${thumbId}.jpg`;
+          const thumbNewPath =
+            FileSystem.documentDirectory + `temp_thumb_${thumbId}.jpg`;
           await FileSystem.copyAsync({
             from: media.thumbnail,
-            to: thumbNewPath
+            to: thumbNewPath,
           });
-          
-          const { url: thumbUrl } = await uploadFileToSupabase(
-            'forum',
-            thumbnailPath,
-            thumbNewPath,
-            'image/jpeg'
-          );
-          
+
+          // Read thumbnail as base64
+          const thumbBase64 = await FileSystem.readAsStringAsync(thumbNewPath, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          // Upload thumbnail to Supabase Storage
+          const { data: thumbData, error: thumbError } = await supabase.storage
+            .from('forum')
+            .upload(thumbnailPath, decode(thumbBase64), {
+              contentType: 'image/jpeg',
+              upsert: true,
+            });
+
+          if (thumbError) {
+            throw thumbError;
+          }
+
+          // Get thumbnail public URL
+          const { data: thumbUrlData } = supabase.storage
+            .from('forum')
+            .getPublicUrl(thumbnailPath);
+
+          const thumbUrl = thumbUrlData?.publicUrl;
+
           thumbnailUrl = thumbUrl;
         }
-        
+
         // Add to media records
         uploadedMedia.push({
           post_id: postId,
           media_url: mediaUrl,
           media_type: media.type,
-          thumbnail_url: thumbnailUrl
+          thumbnail_url: thumbnailUrl,
         });
       } catch (error) {
-        console.error('Error uploading media:', error.message || JSON.stringify(error));
+        console.error(
+          'Error uploading media:',
+          error.message || JSON.stringify(error),
+        );
         Alert.alert(
-          'Upload Error', 
-          `Failed to upload ${media.type}. Please check your connection and try again.`
+          'Upload Error',
+          `Failed to upload ${media.type}. Please check your connection and try again.`,
         );
       }
     }
-    
+
     return uploadedMedia;
   }
 
@@ -424,50 +504,55 @@ export default function ForumPost() {
       Alert.alert('Error', 'Post cannot be empty. Please add text or media.');
       return;
     }
-    
+
     if (!user) {
       Alert.alert('Error', 'You must be logged in to post');
       return;
     }
-    
+
     try {
       setUploading(true);
-      
+
       // Insert new post to Supabase
       const { data: postData, error: postError } = await supabase
         .from('forum_posts')
         .insert({
+          title: newPostText.trim().substring(0, 100) || 'Forum Post', // Use first 100 chars as title or default
           content: newPostText.trim(),
-          user_id: user.id
+          user_id: user.id,
+          visibility: postVisibility,
         })
         .select('id')
         .single();
-      
-      if (postError) throw postError;
-      
+
+      if (postError) {
+        throw postError;
+      }
+
       // Upload media files if any
       if (mediaFiles.length > 0) {
         const uploadedMedia = await uploadMediaFiles(postData.id);
-        
+
         // Insert media references to database
         if (uploadedMedia.length > 0) {
           const { error: mediaError } = await supabase
             .from('forum_post_media')
             .insert(uploadedMedia);
-            
+
           if (mediaError) {
             console.error('Error inserting media references:', mediaError);
           }
         }
       }
-      
+
       // Clear input and media files
       setNewPostText('');
       setMediaFiles([]);
-      
+      setPostVisibility('public');
+
       // Refresh posts
       fetchPosts();
-      
+
       Alert.alert('Success', 'Your post has been published!');
     } catch (error) {
       console.error('Error creating forum post:', error);
@@ -484,7 +569,7 @@ export default function ForumPost() {
   };
 
   // Handle video playback state
-  const handleVideoPress = (videoId) => {
+  const handleVideoPress = videoId => {
     if (playingVideoId === videoId) {
       // If this video is already playing, pause it
       if (videoRef.current) {
@@ -506,107 +591,114 @@ export default function ForumPost() {
     setCurrentMediaList(mediaItems);
     setCurrentMediaIndex(index);
     setMediaViewerVisible(true);
-    
+
     // Pause any playing video
     if (videoRef.current && playingVideoId) {
       videoRef.current.pauseAsync();
       setPlayingVideoId(null);
     }
   };
-  
+
   // Close media viewer
   const closeMediaViewer = () => {
     setMediaViewerVisible(false);
   };
-  
+
   // Navigate to next media in viewer
   const goToNextMedia = () => {
     if (currentMediaIndex < currentMediaList.length - 1) {
       setCurrentMediaIndex(currentMediaIndex + 1);
     }
   };
-  
+
   // Navigate to previous media in viewer
   const goToPrevMedia = () => {
     if (currentMediaIndex > 0) {
       setCurrentMediaIndex(currentMediaIndex - 1);
     }
   };
-  
+
   // Render fullscreen media viewer modal
   const renderMediaViewer = () => {
-    if (!mediaViewerVisible || currentMediaList.length === 0) return null;
-    
+    if (!mediaViewerVisible || currentMediaList.length === 0) {
+      return null;
+    }
+
     const currentMedia = currentMediaList[currentMediaIndex];
     const isVideo = currentMedia.media_type === 'video';
-    
+
     return (
       <Modal
         visible={mediaViewerVisible}
         transparent={true}
-        animationType="fade"
+        animationType='fade'
         onRequestClose={closeMediaViewer}
       >
         <View style={styles.mediaViewerContainer}>
           <View style={styles.mediaViewerHeader}>
-            <TouchableOpacity onPress={closeMediaViewer} style={styles.closeButton}>
-              <Ionicons name="close" size={28} color="#FFFFFF" />
+            <TouchableOpacity
+              onPress={closeMediaViewer}
+              style={styles.closeButton}
+            >
+              <Ionicons name='close' size={28} color='#FFFFFF' />
             </TouchableOpacity>
             <Text style={styles.mediaViewerCounter}>
               {currentMediaIndex + 1} / {currentMediaList.length}
             </Text>
           </View>
-          
+
           <View style={styles.mediaViewerContent}>
             {isVideo ? (
               <Video
                 source={{ uri: currentMedia.media_url }}
-                rate={1.0}
-                volume={1.0}
-                isMuted={false}
-                resizeMode="contain"
-                shouldPlay={true}
+                resizeMode='contain'
                 useNativeControls
                 style={styles.fullscreenVideo}
+                shouldPlay
               />
             ) : (
               <Image
                 source={{ uri: currentMedia.media_url }}
                 style={styles.fullscreenImage}
-                resizeMode="contain"
+                resizeMode='contain'
               />
             )}
           </View>
-          
+
           {currentMediaList.length > 1 && (
             <View style={styles.mediaViewerNavigation}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={goToPrevMedia}
                 disabled={currentMediaIndex === 0}
                 style={[
-                  styles.navButton, 
-                  currentMediaIndex === 0 && styles.navButtonDisabled
+                  styles.navButton,
+                  currentMediaIndex === 0 && styles.navButtonDisabled,
                 ]}
               >
-                <Ionicons 
-                  name="chevron-back" 
-                  size={30} 
-                  color={currentMediaIndex === 0 ? "#888888" : "#FFFFFF"} 
+                <Ionicons
+                  name='chevron-back'
+                  size={30}
+                  color={currentMediaIndex === 0 ? '#888888' : '#FFFFFF'}
                 />
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 onPress={goToNextMedia}
                 disabled={currentMediaIndex === currentMediaList.length - 1}
                 style={[
-                  styles.navButton, 
-                  currentMediaIndex === currentMediaList.length - 1 && styles.navButtonDisabled
+                  styles.navButton,
+                  currentMediaIndex === currentMediaList.length - 1 &&
+                    styles.navButtonDisabled,
                 ]}
               >
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={30} 
-                  color={currentMediaIndex === currentMediaList.length - 1 ? "#888888" : "#FFFFFF"} 
+                <Ionicons
+                  name='chevron-forward'
+                  size={30}
+                  color={
+                    currentMediaIndex === currentMediaList.length - 1
+                      ? '#888888'
+                      : '#FFFFFF'
+                  }
                 />
               </TouchableOpacity>
             </View>
@@ -615,36 +707,44 @@ export default function ForumPost() {
       </Modal>
     );
   };
-  
+
   // Render media preview for uploads
   const renderMediaPreview = () => {
-    if (mediaFiles.length === 0) return null;
-    
+    if (mediaFiles.length === 0) {
+      return null;
+    }
+
     return (
-      <ScrollView 
-        horizontal 
+      <ScrollView
+        horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.mediaPreviewContainer}
       >
-        {mediaFiles.map((media) => (
+        {mediaFiles.map(media => (
           <View key={media.tempId} style={styles.mediaPreviewItem}>
             {media.type === 'image' ? (
-              <Image source={{ uri: media.uri }} style={styles.mediaPreviewImage} />
+              <Image
+                source={{ uri: media.uri }}
+                style={styles.mediaPreviewImage}
+              />
             ) : (
-              <Image source={{ uri: media.thumbnail }} style={styles.mediaPreviewImage} />
+              <Image
+                source={{ uri: media.thumbnail }}
+                style={styles.mediaPreviewImage}
+              />
             )}
-            
+
             {media.type === 'video' && (
               <View style={styles.videoIndicator}>
-                <Ionicons name="play-circle" size={20} color="#FFF" />
+                <Ionicons name='play-circle' size={20} color='#FFF' />
               </View>
             )}
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.removeMediaButton}
               onPress={() => removeMedia(media.tempId)}
             >
-              <Ionicons name="close-circle" size={22} color="#FF3B30" />
+              <Ionicons name='close-circle' size={22} color='#FF3B30' />
             </TouchableOpacity>
           </View>
         ))}
@@ -653,23 +753,25 @@ export default function ForumPost() {
   };
 
   // Improved media grid display for posts
-  const renderPostMedia = (media) => {
-    if (!media || media.length === 0) return null;
-    
+  const renderPostMedia = media => {
+    if (!media || media.length === 0) {
+      return null;
+    }
+
     // If there's only one media item
     if (media.length === 1) {
       const item = media[0];
-      
+
       if (item.media_type === 'image') {
         return (
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => openMediaViewer(media, 0)}
             style={styles.singleMediaContainer}
           >
-            <Image 
-              source={{ uri: item.media_url }} 
-              style={styles.singleMediaImage} 
-              resizeMode="cover"
+            <Image
+              source={{ uri: item.media_url }}
+              style={styles.singleMediaImage}
+              resizeMode='cover'
             />
           </TouchableOpacity>
         );
@@ -681,24 +783,22 @@ export default function ForumPost() {
                 ref={videoRef}
                 source={{ uri: item.media_url }}
                 useNativeControls
-                resizeMode="cover"
-                isLooping
-                onPlaybackStatusUpdate={status => {
-                  if (status.didJustFinish) {
-                    setPlayingVideoId(null);
-                  }
-                }}
+                resizeMode='cover'
                 style={styles.video}
                 shouldPlay={true}
               />
             ) : (
               <TouchableOpacity onPress={() => openMediaViewer(media, 0)}>
-                <Image 
-                  source={{ uri: item.thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
+                <Image
+                  source={{
+                    uri:
+                      item.thumbnail_url ||
+                      'https://via.placeholder.com/300x200?text=Video',
+                  }}
                   style={styles.videoThumbnail}
                 />
                 <View style={styles.playButtonOverlay}>
-                  <Ionicons name="play-circle" size={50} color="#FFF" />
+                  <Ionicons name='play-circle' size={50} color='#FFF' />
                 </View>
               </TouchableOpacity>
             )}
@@ -706,32 +806,36 @@ export default function ForumPost() {
         );
       }
     }
-    
+
     // For 2 media items - side by side
     if (media.length === 2) {
       return (
         <View style={styles.mediaGrid}>
           {media.map((item, index) => (
-            <TouchableOpacity 
-              key={item.id} 
+            <TouchableOpacity
+              key={item.id}
               style={styles.gridItem2}
               onPress={() => openMediaViewer(media, index)}
             >
               {item.media_type === 'image' ? (
-                <Image 
-                  source={{ uri: item.media_url }} 
-                  style={styles.gridItemImage} 
-                  resizeMode="cover"
+                <Image
+                  source={{ uri: item.media_url }}
+                  style={styles.gridItemImage}
+                  resizeMode='cover'
                 />
               ) : (
                 <View style={styles.gridItemVideo}>
-                  <Image 
-                    source={{ uri: item.thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
+                  <Image
+                    source={{
+                      uri:
+                        item.thumbnail_url ||
+                        'https://via.placeholder.com/300x200?text=Video',
+                    }}
                     style={styles.gridItemImage}
-                    resizeMode="cover"
+                    resizeMode='cover'
                   />
                   <View style={styles.playButtonSmall}>
-                    <Ionicons name="play-circle" size={30} color="#FFF" />
+                    <Ionicons name='play-circle' size={30} color='#FFF' />
                   </View>
                 </View>
               )}
@@ -740,57 +844,65 @@ export default function ForumPost() {
         </View>
       );
     }
-    
+
     // For 3 media items - 1 large + 2 small
     if (media.length === 3) {
       return (
         <View style={styles.mediaGrid}>
-          <TouchableOpacity 
-            style={styles.gridItemLarge} 
+          <TouchableOpacity
+            style={styles.gridItemLarge}
             onPress={() => openMediaViewer(media, 0)}
           >
             {media[0].media_type === 'image' ? (
-              <Image 
-                source={{ uri: media[0].media_url }} 
-                style={styles.gridItemImage} 
-                resizeMode="cover"
+              <Image
+                source={{ uri: media[0].media_url }}
+                style={styles.gridItemImage}
+                resizeMode='cover'
               />
             ) : (
               <View style={styles.gridItemVideo}>
-                <Image 
-                  source={{ uri: media[0].thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
+                <Image
+                  source={{
+                    uri:
+                      media[0].thumbnail_url ||
+                      'https://via.placeholder.com/300x200?text=Video',
+                  }}
                   style={styles.gridItemImage}
-                  resizeMode="cover"
+                  resizeMode='cover'
                 />
                 <View style={styles.playButtonSmall}>
-                  <Ionicons name="play-circle" size={30} color="#FFF" />
+                  <Ionicons name='play-circle' size={30} color='#FFF' />
                 </View>
               </View>
             )}
           </TouchableOpacity>
-          
+
           <View style={styles.gridItemSmallContainer}>
             {media.slice(1, 3).map((item, index) => (
-              <TouchableOpacity 
-                key={item.id} 
+              <TouchableOpacity
+                key={item.id}
                 style={styles.gridItemSmall}
                 onPress={() => openMediaViewer(media, index + 1)}
               >
                 {item.media_type === 'image' ? (
-                  <Image 
-                    source={{ uri: item.media_url }} 
-                    style={styles.gridItemImage} 
-                    resizeMode="cover"
+                  <Image
+                    source={{ uri: item.media_url }}
+                    style={styles.gridItemImage}
+                    resizeMode='cover'
                   />
                 ) : (
                   <View style={styles.gridItemVideo}>
-                    <Image 
-                      source={{ uri: item.thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
+                    <Image
+                      source={{
+                        uri:
+                          item.thumbnail_url ||
+                          'https://via.placeholder.com/300x200?text=Video',
+                      }}
                       style={styles.gridItemImage}
-                      resizeMode="cover"
+                      resizeMode='cover'
                     />
                     <View style={styles.playButtonSmall}>
-                      <Ionicons name="play-circle" size={24} color="#FFF" />
+                      <Ionicons name='play-circle' size={24} color='#FFF' />
                     </View>
                   </View>
                 )}
@@ -800,35 +912,39 @@ export default function ForumPost() {
         </View>
       );
     }
-    
+
     // For 4 or more media items - grid layout with "more" indicator
     return (
       <View style={styles.mediaGrid}>
         {media.slice(0, 4).map((item, index) => (
-          <TouchableOpacity 
-            key={item.id} 
+          <TouchableOpacity
+            key={item.id}
             style={styles.gridItem4}
             onPress={() => openMediaViewer(media, index)}
           >
             {item.media_type === 'image' ? (
-              <Image 
-                source={{ uri: item.media_url }} 
-                style={styles.gridItemImage} 
-                resizeMode="cover"
+              <Image
+                source={{ uri: item.media_url }}
+                style={styles.gridItemImage}
+                resizeMode='cover'
               />
             ) : (
               <View style={styles.gridItemVideo}>
-                <Image 
-                  source={{ uri: item.thumbnail_url || 'https://via.placeholder.com/300x200?text=Video' }} 
+                <Image
+                  source={{
+                    uri:
+                      item.thumbnail_url ||
+                      'https://via.placeholder.com/300x200?text=Video',
+                  }}
                   style={styles.gridItemImage}
-                  resizeMode="cover"
+                  resizeMode='cover'
                 />
                 <View style={styles.playButtonSmall}>
-                  <Ionicons name="play-circle" size={24} color="#FFF" />
+                  <Ionicons name='play-circle' size={24} color='#FFF' />
                 </View>
               </View>
             )}
-            
+
             {index === 3 && media.length > 4 && (
               <View style={styles.moreOverlay}>
                 <Text style={styles.moreText}>+{media.length - 4}</Text>
@@ -841,17 +957,19 @@ export default function ForumPost() {
   };
 
   // Toggle like on post
-  const toggleLike = async (postId) => {
+  const toggleLike = async postId => {
     if (!user) {
       Alert.alert('Sign In Required', 'Please sign in to like posts');
       return;
     }
-    
-    if (submittingLike) return;
-    
+
+    if (submittingLike) {
+      return;
+    }
+
     try {
       setSubmittingLike(true);
-      
+
       if (userLikedPosts[postId]) {
         // User already liked this post, so remove the like
         const { error } = await supabase
@@ -859,40 +977,42 @@ export default function ForumPost() {
           .delete()
           .eq('post_id', postId)
           .eq('user_id', user.id);
-          
-        if (error) throw error;
-        
+
+        if (error) {
+          throw error;
+        }
+
         // Update local state
         setUserLikedPosts(prev => {
           const newState = { ...prev };
           delete newState[postId];
           return newState;
         });
-        
+
         setLikeCounts(prev => ({
           ...prev,
-          [postId]: (prev[postId] || 1) - 1
+          [postId]: (prev[postId] || 1) - 1,
         }));
       } else {
         // User hasn't liked this post, so add a like
-        const { error } = await supabase
-          .from('forum_likes')
-          .insert({
-            post_id: postId,
-            user_id: user.id
-          });
-          
-        if (error) throw error;
-        
+        const { error } = await supabase.from('forum_likes').insert({
+          post_id: postId,
+          user_id: user.id,
+        });
+
+        if (error) {
+          throw error;
+        }
+
         // Update local state
         setUserLikedPosts(prev => ({
           ...prev,
-          [postId]: true
+          [postId]: true,
         }));
-        
+
         setLikeCounts(prev => ({
           ...prev,
-          [postId]: (prev[postId] || 0) + 1
+          [postId]: (prev[postId] || 0) + 1,
         }));
       }
     } catch (error) {
@@ -903,46 +1023,70 @@ export default function ForumPost() {
     }
   };
 
+  // Handle sharing a post
+  const handleShare = async post => {
+    try {
+      const shareContent = {
+        message: `Check out this hiking post: ${post.content || post.title || 'Hiking adventure'}`,
+        title: 'Hiking Post Share',
+      };
+
+      const result = await Share.share(shareContent);
+
+      if (result.action === Share.sharedAction) {
+        // Post was shared successfully
+        console.log('Post shared successfully');
+      }
+    } catch (error) {
+      console.error('Error sharing post:', error);
+      Alert.alert('Error', 'Failed to share post. Please try again.');
+    }
+  };
+
   // Fetch comments for a post
-  const fetchComments = async (postId) => {
+  const fetchComments = async postId => {
     try {
       // Don't re-fetch if we already have comments and they're visible
       if (postComments[postId] && commentsVisible[postId]) {
         setCommentsVisible(prev => ({
           ...prev,
-          [postId]: false
+          [postId]: false,
         }));
         return;
       }
-      
+
       // If we're toggling to show comments, but don't have them yet
       if (!postComments[postId]) {
         const { data, error } = await supabase
           .from('forum_comments')
-          .select(`
+          .select(
+            `
             id,
             content,
             created_at,
             user_id
-          `)
+          `,
+          )
           .eq('post_id', postId)
           .order('created_at', { ascending: true });
-          
-        if (error) throw error;
-        
+
+        if (error) {
+          throw error;
+        }
+
         // Get all unique commenter user IDs
         const commenterIds = [...new Set(data.map(comment => comment.user_id))];
-        
+
         // Get profile data for commenters
         const { data: commenterProfiles, error: profileError } = await supabase
           .from('profiles')
           .select('id, username, avatar_url')
           .in('id', commenterIds);
-          
+
         if (profileError) {
           console.error('Error fetching commenter profiles:', profileError);
         }
-        
+
         // Create a map of user IDs to profiles
         const profileMap = {};
         if (commenterProfiles) {
@@ -950,26 +1094,26 @@ export default function ForumPost() {
             profileMap[profile.id] = profile;
           });
         }
-        
+
         // Attach profile data to comments
         const commentsWithProfiles = data.map(comment => ({
           ...comment,
-          profile: profileMap[comment.user_id] || null
+          profile: profileMap[comment.user_id] || null,
         }));
-        
+
         // Update comments state
         setPostComments(prev => ({
           ...prev,
-          [postId]: commentsWithProfiles
+          [postId]: commentsWithProfiles,
         }));
       }
-      
+
       // Toggle visibility
       setCommentsVisible(prev => ({
         ...prev,
-        [postId]: !prev[postId]
+        [postId]: !prev[postId],
       }));
-      
+
       // Set active commenting post
       setActiveCommentPostId(postId);
     } catch (error) {
@@ -983,23 +1127,25 @@ export default function ForumPost() {
     if (!commentText.trim() || !activeCommentPostId || !user) {
       return;
     }
-    
+
     try {
       setSubmittingComment(true);
-      
+
       // Insert comment to database
       const { data, error } = await supabase
         .from('forum_comments')
         .insert({
           post_id: activeCommentPostId,
           user_id: user.id,
-          content: commentText.trim()
+          content: commentText.trim(),
         })
         .select('id, created_at')
         .single();
-        
-      if (error) throw error;
-      
+
+      if (error) {
+        throw error;
+      }
+
       // Add the new comment to state
       const newComment = {
         id: data.id,
@@ -1009,37 +1155,39 @@ export default function ForumPost() {
         profile: {
           id: user.id,
           username: user.email, // fallback to email if profile not loaded
-          avatar_url: null
-        }
+          avatar_url: null,
+        },
       };
-      
+
       // If we have the user's profile, use it
       const { data: profileData } = await supabase
         .from('profiles')
         .select('username, avatar_url')
         .eq('id', user.id)
         .single();
-        
+
       if (profileData) {
         newComment.profile.username = profileData.username;
         newComment.profile.avatar_url = profileData.avatar_url;
       }
-      
+
       // Update comments in state
       setPostComments(prev => ({
         ...prev,
-        [activeCommentPostId]: [...(prev[activeCommentPostId] || []), newComment]
+        [activeCommentPostId]: [
+          ...(prev[activeCommentPostId] || []),
+          newComment,
+        ],
       }));
-      
+
       // Update comment count
       setCommentCounts(prev => ({
         ...prev,
-        [activeCommentPostId]: (prev[activeCommentPostId] || 0) + 1
+        [activeCommentPostId]: (prev[activeCommentPostId] || 0) + 1,
       }));
-      
+
       // Clear input
       setCommentText('');
-      
     } catch (error) {
       console.error('Error submitting comment:', error);
       Alert.alert('Error', 'Failed to post comment. Please try again.');
@@ -1049,84 +1197,93 @@ export default function ForumPost() {
   };
 
   // Render a single comment
-  const renderComment = (comment) => {
+  const renderComment = comment => {
     const date = new Date(comment.created_at);
-    const formattedDate = date.toLocaleDateString() + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
+    const formattedDate =
+      date.toLocaleDateString() +
+      ' at ' +
+      date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     return (
       <View key={comment.id} style={styles.commentItem}>
         <View style={styles.commentHeader}>
           {comment.profile?.avatar_url ? (
-            <Image source={{ uri: comment.profile.avatar_url }} style={styles.commentAvatar} />
+            <Image
+              source={{ uri: comment.profile.avatar_url }}
+              style={styles.commentAvatar}
+            />
           ) : (
             <View style={styles.commentAvatarPlaceholder}>
               <Text style={styles.commentAvatarText}>
-                {comment.profile?.username ? comment.profile.username.charAt(0).toUpperCase() : '?'}
+                {comment.profile?.username
+                  ? comment.profile.username.charAt(0).toUpperCase()
+                  : '?'}
               </Text>
             </View>
           )}
-          
+
           <View style={styles.commentInfo}>
-            <Text style={styles.commentUsername}>{comment.profile?.username || 'Anonymous'}</Text>
+            <Text style={styles.commentUsername}>
+              {comment.profile?.username || 'Anonymous'}
+            </Text>
             <Text style={styles.commentDate}>{formattedDate}</Text>
           </View>
         </View>
-        
+
         <Text style={styles.commentContent}>{comment.content}</Text>
       </View>
     );
   };
 
   // Render comments section for a post
-  const renderCommentsSection = (postId) => {
+  const renderCommentsSection = postId => {
     if (!commentsVisible[postId]) {
       return null;
     }
-    
+
     const comments = postComments[postId] || [];
-    
+
     return (
       <View style={styles.commentsContainer}>
         <View style={styles.commentsDivider} />
-        
+
         <View style={styles.commentsHeader}>
           <Text style={styles.commentsTitle}>
             Comments ({commentCounts[postId] || 0})
           </Text>
         </View>
-        
+
         {comments.length === 0 ? (
           <Text style={styles.noCommentsText}>
             No comments yet. Be the first to share your thoughts!
           </Text>
         ) : (
-          <View style={styles.commentsList}>
-            {comments.map(renderComment)}
-          </View>
+          <View style={styles.commentsList}>{comments.map(renderComment)}</View>
         )}
-        
+
         <View style={styles.commentInputContainer}>
           <TextInput
             style={styles.commentInput}
-            placeholder="Write a comment..."
+            placeholder='Write a comment...'
             value={commentText}
             onChangeText={setCommentText}
             multiline
             maxLength={500}
           />
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={[
-              styles.commentSubmitButton, 
-              (!commentText.trim() || submittingComment) && styles.commentSubmitButtonDisabled
-            ]} 
+              styles.commentSubmitButton,
+              (!commentText.trim() || submittingComment) &&
+                styles.commentSubmitButtonDisabled,
+            ]}
             onPress={submitComment}
             disabled={!commentText.trim() || submittingComment}
           >
             {submittingComment ? (
-              <ActivityIndicator size="small" color="#FFF" />
+              <ActivityIndicator size='small' color='#FFF' />
             ) : (
-              <Ionicons name="send" size={18} color="#FFF" />
+              <Ionicons name='send' size={18} color='#FFF' />
             )}
           </TouchableOpacity>
         </View>
@@ -1138,17 +1295,20 @@ export default function ForumPost() {
   const renderPost = ({ item }) => {
     // Format date
     const date = new Date(item.created_at);
-    const formattedDate = date.toLocaleDateString() + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
+    const formattedDate =
+      date.toLocaleDateString() +
+      ' at ' +
+      date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     // Get username and avatar
     const username = item.profiles?.username || 'Anonymous';
     const avatarUrl = item.profiles?.avatar_url;
-    
+
     // Get like and comment counts
     const likeCount = likeCounts[item.id] || 0;
     const commentCount = commentCounts[item.id] || 0;
     const userLiked = userLikedPosts[item.id] || false;
-    
+
     return (
       <View style={styles.postItem}>
         <View style={styles.postHeader}>
@@ -1156,80 +1316,94 @@ export default function ForumPost() {
             <Image source={{ uri: avatarUrl }} style={styles.avatar} />
           ) : (
             <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarText}>{username.charAt(0).toUpperCase()}</Text>
+              <Text style={styles.avatarText}>
+                {username.charAt(0).toUpperCase()}
+              </Text>
             </View>
           )}
-          
+
           <View style={styles.postInfo}>
             <Text style={styles.username}>{username}</Text>
             <Text style={styles.date}>{formattedDate}</Text>
           </View>
         </View>
-        
-        {item.content && (
-          <Text style={styles.postContent}>{item.content}</Text>
-        )}
-        
+
+        {item.content && <Text style={styles.postContent}>{item.content}</Text>}
+
         {renderPostMedia(item.media)}
-        
+
         <View style={styles.postActionStats}>
           {likeCount > 0 && (
             <View style={styles.statItem}>
-              <Ionicons name="heart" size={12} color="#FF3B30" />
+              <Ionicons name='heart' size={12} color='#FF3B30' />
               <Text style={styles.statText}>{likeCount}</Text>
             </View>
           )}
-          
+
           {commentCount > 0 && (
-            <TouchableOpacity 
-              style={styles.statItem} 
+            <TouchableOpacity
+              style={styles.statItem}
               onPress={() => fetchComments(item.id)}
             >
               <Text style={styles.statText}>{commentCount} comments</Text>
             </TouchableOpacity>
           )}
         </View>
-        
+
         <View style={styles.postActions}>
-          <TouchableOpacity 
-            style={[styles.actionButton, userLiked && styles.actionButtonActive]}
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              userLiked && styles.actionButtonActive,
+            ]}
             onPress={() => toggleLike(item.id)}
             disabled={submittingLike}
           >
-            <Ionicons 
-              name={userLiked ? "heart" : "heart-outline"} 
-              size={20} 
-              color={userLiked ? "#FF3B30" : "#666"} 
+            <Ionicons
+              name={userLiked ? 'heart' : 'heart-outline'}
+              size={20}
+              color={userLiked ? '#FF3B30' : '#666'}
             />
-            <Text 
+            <Text
               style={[styles.actionText, userLiked && styles.actionTextActive]}
             >
               {userLiked ? 'Liked' : 'Like'}
             </Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.actionButton, commentsVisible[item.id] && styles.actionButtonActive]} 
+
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              commentsVisible[item.id] && styles.actionButtonActive,
+            ]}
             onPress={() => fetchComments(item.id)}
           >
-            <Ionicons 
-              name={commentsVisible[item.id] ? "chatbubble" : "chatbubble-outline"} 
-              size={20} 
-              color={commentsVisible[item.id] ? "#2E7D32" : "#666"} 
+            <Ionicons
+              name={
+                commentsVisible[item.id] ? 'chatbubble' : 'chatbubble-outline'
+              }
+              size={20}
+              color={commentsVisible[item.id] ? '#2E7D32' : '#666'}
             />
-            <Text 
-              style={[styles.actionText, commentsVisible[item.id] && styles.actionTextActive]}
+            <Text
+              style={[
+                styles.actionText,
+                commentsVisible[item.id] && styles.actionTextActive,
+              ]}
             >
               Comment
             </Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="share-social-outline" size={20} color="#666" />
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => handleShare(item)}
+          >
+            <Ionicons name='share-social-outline' size={20} color='#666' />
             <Text style={styles.actionText}>Share</Text>
           </TouchableOpacity>
         </View>
-        
+
         {renderCommentsSection(item.id)}
       </View>
     );
@@ -1239,7 +1413,9 @@ export default function ForumPost() {
   const checkConnectivity = async () => {
     // Simple fetch to test connectivity to Supabase
     try {
-      const response = await fetch(`${supabase.supabaseUrl}/storage/v1/object/info/forum`);
+      const response = await fetch(
+        `${supabase.supabaseUrl}/storage/v1/object/info/forum`,
+      );
       return response.status !== 500 && response.status !== 404;
     } catch (error) {
       console.error('Connectivity check failed:', error);
@@ -1249,78 +1425,130 @@ export default function ForumPost() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      
+      <StatusBar barStyle='dark-content' backgroundColor='#FFFFFF' />
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Hiking Forum</Text>
       </View>
-      
+
       {/* Post input area */}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
-          placeholder="Share your hiking experiences, ask questions, or find trail buddies..."
+          placeholder='Share your hiking experiences, ask questions, or find trail buddies...'
           value={newPostText}
           onChangeText={setNewPostText}
           multiline
-          placeholderTextColor="#9E9E9E"
+          placeholderTextColor='#9E9E9E'
         />
-        
+
         {renderMediaPreview()}
-        
+
+        {/* Visibility options */}
+        <View style={styles.visibilityContainer}>
+          <Text style={styles.visibilityLabel}>Post Visibility:</Text>
+          <View style={styles.visibilityButtons}>
+            <TouchableOpacity
+              style={[
+                styles.visibilityButton,
+                postVisibility === 'public' && styles.visibilityButtonActive,
+              ]}
+              onPress={() => setPostVisibility('public')}
+            >
+              <Ionicons
+                name='globe-outline'
+                size={16}
+                color={postVisibility === 'public' ? '#FFFFFF' : '#2E7D32'}
+              />
+              <Text
+                style={[
+                  styles.visibilityButtonText,
+                  postVisibility === 'public' &&
+                    styles.visibilityButtonTextActive,
+                ]}
+              >
+                Public
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.visibilityButton,
+                postVisibility === 'private' && styles.visibilityButtonActive,
+              ]}
+              onPress={() => setPostVisibility('private')}
+            >
+              <Ionicons
+                name='lock-closed-outline'
+                size={16}
+                color={postVisibility === 'private' ? '#FFFFFF' : '#2E7D32'}
+              />
+              <Text
+                style={[
+                  styles.visibilityButtonText,
+                  postVisibility === 'private' &&
+                    styles.visibilityButtonTextActive,
+                ]}
+              >
+                Private
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <View style={styles.inputActions}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.mediaButton}
             onPress={() => setMediaOptionsVisible(true)}
             disabled={uploading}
           >
-            <Ionicons name="image" size={24} color="#2E7D32" />
+            <Ionicons name='image' size={24} color='#2E7D32' />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.postButton, (!newPostText.trim() && mediaFiles.length === 0) && styles.postButtonDisabled]}
+
+          <TouchableOpacity
+            style={[
+              styles.postButton,
+              !newPostText.trim() &&
+                mediaFiles.length === 0 &&
+                styles.postButtonDisabled,
+            ]}
             onPress={submitPost}
-            disabled={(!newPostText.trim() && mediaFiles.length === 0) || uploading}
+            disabled={
+              (!newPostText.trim() && mediaFiles.length === 0) || uploading
+            }
           >
             {uploading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size='small' color='#FFFFFF' />
             ) : (
               <Text style={styles.postButtonText}>Post</Text>
             )}
           </TouchableOpacity>
         </View>
       </View>
-      
+
       {/* Media options modal */}
       <Modal
         visible={mediaOptionsVisible}
         transparent={true}
-        animationType="fade"
+        animationType='fade'
         onRequestClose={() => setMediaOptionsVisible(false)}
       >
-        <TouchableOpacity 
-          style={styles.modalOverlay} 
-          activeOpacity={1} 
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
           onPress={() => setMediaOptionsVisible(false)}
         >
           <View style={styles.modalContent}>
-            <TouchableOpacity 
-              style={styles.mediaOption}
-              onPress={pickImage}
-            >
-              <Ionicons name="image" size={24} color="#2E7D32" />
+            <TouchableOpacity style={styles.mediaOption} onPress={pickImage}>
+              <Ionicons name='image' size={24} color='#2E7D32' />
               <Text style={styles.mediaOptionText}>Upload Photo</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.mediaOption}
-              onPress={pickVideo}
-            >
-              <Ionicons name="videocam" size={24} color="#2E7D32" />
+
+            <TouchableOpacity style={styles.mediaOption} onPress={pickVideo}>
+              <Ionicons name='videocam' size={24} color='#2E7D32' />
               <Text style={styles.mediaOptionText}>Upload Video</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.cancelOption}
               onPress={() => setMediaOptionsVisible(false)}
             >
@@ -1329,37 +1557,49 @@ export default function ForumPost() {
           </View>
         </TouchableOpacity>
       </Modal>
-      
+
       {/* Posts list */}
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2E7D32" />
+          <ActivityIndicator size='large' color='#2E7D32' />
           <Text style={styles.loadingText}>Loading posts...</Text>
         </View>
       ) : (
         <FlatList
           data={posts}
           renderItem={renderPost}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={item => item.id.toString()}
           contentContainerStyle={styles.postsList}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={["#2E7D32"]}
-              tintColor="#2E7D32"
+              colors={['#2E7D32']}
+              tintColor='#2E7D32'
             />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubbles-outline" size={60} color="#DDD" />
+              <Ionicons name='chatbubbles-outline' size={60} color='#DDD' />
               <Text style={styles.emptyTitle}>No Posts Yet</Text>
-              <Text style={styles.emptyText}>Be the first to share your thoughts!</Text>
+              <Text style={styles.emptyText}>
+                Be the first to share your thoughts!
+              </Text>
             </View>
           }
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={5}
+          updateCellsBatchingPeriod={50}
+          initialNumToRender={8}
+          windowSize={10}
+          getItemLayout={(data, index) => ({
+            length: 200,
+            offset: 200 * index,
+            index,
+          })}
         />
       )}
-      
+
       {/* Render the fullscreen media viewer modal */}
       {renderMediaViewer()}
     </SafeAreaView>
@@ -1495,6 +1735,42 @@ const styles = StyleSheet.create({
     right: -5,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
+  },
+  visibilityContainer: {
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  visibilityLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#424242',
+    marginBottom: 8,
+  },
+  visibilityButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  visibilityButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2E7D32',
+    backgroundColor: '#FFFFFF',
+  },
+  visibilityButtonActive: {
+    backgroundColor: '#2E7D32',
+  },
+  visibilityButtonText: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: '#2E7D32',
+    fontWeight: '500',
+  },
+  visibilityButtonTextActive: {
+    color: '#FFFFFF',
   },
   loadingContainer: {
     flex: 1,
@@ -1658,7 +1934,7 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '500',
   },
-  
+
   // Comment section styles
   commentsContainer: {
     padding: 10,
@@ -1762,7 +2038,7 @@ const styles = StyleSheet.create({
   commentSubmitButtonDisabled: {
     backgroundColor: '#CCCCCC',
   },
-  
+
   // New and updated styles for responsive media grid
   singleMediaContainer: {
     width: '100%',
@@ -1771,7 +2047,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 15,
   },
-  singleMediaImage: {
+  fullSizeMediaImage: {
     width: '100%',
     height: '100%',
   },
@@ -1847,7 +2123,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 'bold',
   },
-  
+
   // Media viewer modal
   mediaViewerContainer: {
     flex: 1,

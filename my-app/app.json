@@ -16,7 +16,15 @@
     "scheme": "ascentra",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourcompany.myapp"
+      "bundleIdentifier": "com.yourcompany.myapp",
+      "hermes": true,
+      "jsEngine": "hermes",
+      "bundler": "metro",
+      "bundleInRelease": true,
+      "bundleInDebug": false,
+      "config": {
+        "googleMapsApiKey": "AIzaSyDummy_Key_For_Development_Replace_With_Real_Key"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -24,21 +32,30 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.yourcompany.myapp",
+      "hermes": true,
+      "jsEngine": "hermes",
+      "enableProguardInReleaseBuilds": true,
+      "enableSeparateBuildPerCPUArchitecture": true,
+      "bundleInRelease": true,
+      "bundleInDebug": false,
+      "usesCleartextTraffic": false,
+      "allowBackup": false,
+      "largeHeap": true,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDummy_Key_For_Development_Replace_With_Real_Key"
+        }
+      },
       "intentFilters": [
         {
           "action": "VIEW",
-          "category": [
-            "DEFAULT",
-            "BROWSABLE"
-          ],
+          "category": ["DEFAULT", "BROWSABLE"],
           "data": {
             "scheme": "ascentra"
           }
         }
       ],
-      "permissions": [
-        "android.permission.RECORD_AUDIO"
-      ]
+      "permissions": ["android.permission.RECORD_AUDIO"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -57,7 +74,9 @@
     "extra": {
       "eas": {
         "projectId": "83c308b7-7b8f-4f3b-9e26-73a1ca42ee31"
-      }
+      },
+      "supabaseUrl": "https://drcgjiadevrzxgwziemq.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRyY2dqaWFkZXZyenhnd3ppZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYyMTMxNzMsImV4cCI6MjA3MTc4OTE3M30.Hs9akIumcSCDz4sGgLVyKwkMqco7dF7045Spv7ItmG0"
     }
   }
 }

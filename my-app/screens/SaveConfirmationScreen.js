@@ -8,7 +8,7 @@ import {
   StatusBar,
   Platform,
   ActivityIndicator,
-  Dimensions
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
@@ -30,54 +30,55 @@ export default function SaveConfirmationScreen({ navigation, route }) {
         setLoading(true);
         // Fetch the saved hike details
         const hikeData = await getHikeById(hikeId);
-        
+
         if (!hikeData) {
           setError('Could not load activity details');
           return;
         }
-        
+
         setHike(hikeData);
-        
+
         // Calculate map region if coordinates exist
         if (hikeData.routeCoordinates && hikeData.routeCoordinates.length > 0) {
           calculateMapRegion(hikeData.routeCoordinates);
         }
       } catch (err) {
-        console.error('Error loading activity details:', err);
         setError('Failed to load activity details');
       } finally {
         setLoading(false);
       }
     };
-    
+
     fetchHikeDetails();
   }, [hikeId]);
 
   // Calculate the map region to show the entire route
-  const calculateMapRegion = (coordinates) => {
-    if (!coordinates || coordinates.length === 0) return;
-    
+  const calculateMapRegion = coordinates => {
+    if (!coordinates || coordinates.length === 0) {
+      return;
+    }
+
     let minLat = coordinates[0].latitude;
     let maxLat = coordinates[0].latitude;
     let minLng = coordinates[0].longitude;
     let maxLng = coordinates[0].longitude;
-    
+
     coordinates.forEach(coord => {
       minLat = Math.min(minLat, coord.latitude);
       maxLat = Math.max(maxLat, coord.latitude);
       minLng = Math.min(minLng, coord.longitude);
       maxLng = Math.max(maxLng, coord.longitude);
     });
-    
+
     // Add padding
     const latPadding = (maxLat - minLat) * 0.2;
     const lngPadding = (maxLng - minLng) * 0.2;
-    
+
     setMapRegion({
       latitude: (minLat + maxLat) / 2,
       longitude: (minLng + maxLng) / 2,
-      latitudeDelta: Math.max((maxLat - minLat) + latPadding, 0.01),
-      longitudeDelta: Math.max((maxLng - minLng) + lngPadding, 0.01)
+      latitudeDelta: Math.max(maxLat - minLat + latPadding, 0.01),
+      longitudeDelta: Math.max(maxLng - minLng + lngPadding, 0.01),
     });
   };
 
@@ -92,7 +93,7 @@ export default function SaveConfirmationScreen({ navigation, route }) {
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2E7D32" />
+        <ActivityIndicator size='large' color='#2E7D32' />
         <Text style={styles.loadingText}>Loading activity details...</Text>
       </SafeAreaView>
     );
@@ -101,9 +102,9 @@ export default function SaveConfirmationScreen({ navigation, route }) {
   if (error) {
     return (
       <SafeAreaView style={styles.errorContainer}>
-        <Ionicons name="alert-circle" size={60} color="#D32F2F" />
+        <Ionicons name='alert-circle' size={60} color='#D32F2F' />
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.errorButton}
           onPress={handleGoToHistory}
         >
@@ -115,48 +116,48 @@ export default function SaveConfirmationScreen({ navigation, route }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
-      
+      <StatusBar barStyle='light-content' backgroundColor='#2E7D32' />
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Activity Saved</Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.closeButton}
           onPress={handleGoToHistory}
         >
-          <Ionicons name="close" size={24} color="white" />
+          <Ionicons name='close' size={24} color='white' />
         </TouchableOpacity>
       </View>
-      
+
       <View style={styles.content}>
         <View style={styles.successCard}>
           <View style={styles.iconContainer}>
-            <Ionicons name="checkmark-circle" size={60} color="#2E7D32" />
+            <Ionicons name='checkmark-circle' size={60} color='#2E7D32' />
           </View>
-          
+
           <Text style={styles.successTitle}>Success!</Text>
           <Text style={styles.successText}>
             Your {hike?.activityType || 'activity'} has been saved successfully.
           </Text>
-          
+
           <View style={styles.statsSummary}>
             <View style={styles.statItem}>
-              <Ionicons name="navigate" size={20} color="#2E7D32" />
+              <Ionicons name='navigate' size={20} color='#2E7D32' />
               <Text style={styles.statLabel}>Distance</Text>
               <Text style={styles.statValue}>
                 {formatDistance(hike?.stats?.distance || 0)}
               </Text>
             </View>
-            
+
             <View style={styles.statItem}>
-              <Ionicons name="time" size={20} color="#2E7D32" />
+              <Ionicons name='time' size={20} color='#2E7D32' />
               <Text style={styles.statLabel}>Duration</Text>
               <Text style={styles.statValue}>
                 {formatDuration(hike?.stats?.duration || 0)}
               </Text>
             </View>
-            
+
             <View style={styles.statItem}>
-              <Ionicons name="trending-up" size={20} color="#2E7D32" />
+              <Ionicons name='trending-up' size={20} color='#2E7D32' />
               <Text style={styles.statLabel}>Elevation</Text>
               <Text style={styles.statValue}>
                 {(hike?.stats?.elevation || 0).toFixed(0)}m
@@ -164,66 +165,70 @@ export default function SaveConfirmationScreen({ navigation, route }) {
             </View>
           </View>
         </View>
-        
+
         {/* Map preview */}
-        {hike?.routeCoordinates && hike.routeCoordinates.length > 0 && mapRegion && (
-          <View style={styles.mapContainer}>
-            <MapView
-              style={styles.map}
-              provider={PROVIDER_GOOGLE}
-              initialRegion={mapRegion}
-              showsUserLocation={false}
-              showsMyLocationButton={false}
-              showsCompass={false}
-              zoomEnabled={true}
-              rotateEnabled={false}
-              scrollEnabled={true}
-            >
-              {/* Route polyline */}
-              <Polyline
-                coordinates={hike.routeCoordinates}
-                strokeWidth={4}
-                strokeColor="#2E7D32" 
-                lineCap="round"
-                lineJoin="round"
-              />
-              
-              {/* Start marker */}
-              {hike.routeCoordinates.length > 0 && (
-                <Marker
-                  coordinate={hike.routeCoordinates[0]}
-                  anchor={{ x: 0.5, y: 0.5 }}
-                >
-                  <View style={styles.startMarker}>
-                    <View style={styles.startMarkerInner} />
-                  </View>
-                </Marker>
-              )}
-              
-              {/* End marker */}
-              {hike.routeCoordinates.length > 0 && (
-                <Marker
-                  coordinate={hike.routeCoordinates[hike.routeCoordinates.length - 1]}
-                  anchor={{ x: 0.5, y: 0.5 }}
-                >
-                  <View style={styles.endMarker}>
-                    <View style={styles.endMarkerInner} />
-                  </View>
-                </Marker>
-              )}
-            </MapView>
-          </View>
-        )}
-        
+        {hike?.routeCoordinates &&
+          hike.routeCoordinates.length > 0 &&
+          mapRegion && (
+            <View style={styles.mapContainer}>
+              <MapView
+                style={styles.map}
+                provider={PROVIDER_GOOGLE}
+                initialRegion={mapRegion}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+                showsCompass={false}
+                zoomEnabled={true}
+                rotateEnabled={false}
+                scrollEnabled={true}
+              >
+                {/* Route polyline */}
+                <Polyline
+                  coordinates={hike.routeCoordinates}
+                  strokeWidth={4}
+                  strokeColor='#2E7D32'
+                  lineCap='round'
+                  lineJoin='round'
+                />
+
+                {/* Start marker */}
+                {hike.routeCoordinates.length > 0 && (
+                  <Marker
+                    coordinate={hike.routeCoordinates[0]}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                  >
+                    <View style={styles.startMarker}>
+                      <View style={styles.startMarkerInner} />
+                    </View>
+                  </Marker>
+                )}
+
+                {/* End marker */}
+                {hike.routeCoordinates.length > 0 && (
+                  <Marker
+                    coordinate={
+                      hike.routeCoordinates[hike.routeCoordinates.length - 1]
+                    }
+                    anchor={{ x: 0.5, y: 0.5 }}
+                  >
+                    <View style={styles.endMarker}>
+                      <View style={styles.endMarkerInner} />
+                    </View>
+                  </Marker>
+                )}
+              </MapView>
+            </View>
+          )}
+
         <View style={styles.buttonContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.detailsButton}
             onPress={handleViewDetails}
           >
             <Text style={styles.detailsButtonText}>View Details</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.historyButton}
             onPress={handleGoToHistory}
           >

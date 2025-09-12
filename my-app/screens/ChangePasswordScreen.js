@@ -11,7 +11,7 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
-  ScrollView
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseClient';
@@ -36,20 +36,19 @@ export default function ChangePasswordScreen({ navigation }) {
 
     try {
       setLoading(true);
-      
+
       const { error } = await supabase.auth.updateUser({
-        password: password
+        password: password,
       });
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
-      Alert.alert(
-        'Success',
-        'Your password has been updated successfully',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+      Alert.alert('Success', 'Your password has been updated successfully', [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
     } catch (error) {
-      console.error('Error changing password:', error.message);
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
@@ -58,19 +57,19 @@ export default function ChangePasswordScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      
+      <StatusBar barStyle='dark-content' backgroundColor='#FFFFFF' />
+
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#333" />
+          <Ionicons name='arrow-back' size={24} color='#333' />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Change Password</Text>
         <View style={{ width: 24 }} />
       </View>
-      
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardAvoid}
@@ -84,9 +83,9 @@ export default function ChangePasswordScreen({ navigation }) {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!passwordVisible}
-                placeholder="Enter new password"
-                placeholderTextColor="#999"
-                autoCapitalize="none"
+                placeholder='Enter new password'
+                placeholderTextColor='#999'
+                autoCapitalize='none'
               />
               <TouchableOpacity
                 style={styles.visibilityToggle}
@@ -95,11 +94,11 @@ export default function ChangePasswordScreen({ navigation }) {
                 <Ionicons
                   name={passwordVisible ? 'eye-off' : 'eye'}
                   size={24}
-                  color="#666"
+                  color='#666'
                 />
               </TouchableOpacity>
             </View>
-            
+
             <Text style={styles.formLabel}>Confirm New Password</Text>
             <View style={styles.passwordContainer}>
               <TextInput
@@ -107,33 +106,38 @@ export default function ChangePasswordScreen({ navigation }) {
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 secureTextEntry={!confirmPasswordVisible}
-                placeholder="Confirm new password"
-                placeholderTextColor="#999"
-                autoCapitalize="none"
+                placeholder='Confirm new password'
+                placeholderTextColor='#999'
+                autoCapitalize='none'
               />
               <TouchableOpacity
                 style={styles.visibilityToggle}
-                onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}
+                onPress={() =>
+                  setConfirmPasswordVisible(!confirmPasswordVisible)
+                }
               >
                 <Ionicons
                   name={confirmPasswordVisible ? 'eye-off' : 'eye'}
                   size={24}
-                  color="#666"
+                  color='#666'
                 />
               </TouchableOpacity>
             </View>
-            
+
             <Text style={styles.passwordRequirements}>
               Password must be at least 6 characters
             </Text>
-            
+
             <TouchableOpacity
-              style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+              style={[
+                styles.submitButton,
+                loading && styles.submitButtonDisabled,
+              ]}
               onPress={handleChangePassword}
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                <ActivityIndicator color='#FFFFFF' size='small' />
               ) : (
                 <Text style={styles.submitButtonText}>Update Password</Text>
               )}

@@ -18,16 +18,20 @@ interface UseLocationReturn {
   stopTracking: () => boolean;
 }
 
-export default function useLocation(options: UseLocationOptions = {}): UseLocationReturn {
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+export default function useLocation(
+  options: UseLocationOptions = {},
+): UseLocationReturn {
+  const [location, setLocation] = useState<Location.LocationObject | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [tracking, setTracking] = useState<boolean>(false);
   const watchId = useRef<Location.LocationSubscription | null>(null);
 
   const defaultOptions: UseLocationOptions = {
     accuracy: Location.Accuracy.BestForNavigation,
-    distanceInterval: 5,  // meters
-    timeInterval: 1000,   // milliseconds
+    distanceInterval: 5, // meters
+    timeInterval: 1000, // milliseconds
   };
 
   const mergedOptions = { ...defaultOptions, ...options };
@@ -37,26 +41,27 @@ export default function useLocation(options: UseLocationOptions = {}): UseLocati
       if (watchId.current) {
         watchId.current.remove();
       }
-    }
-  }, [])
+    };
+  }, []);
 
   const requestPermissions = async (): Promise<boolean> => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      
+
       if (status !== 'granted') {
         setError('Location permission not granted');
         return false;
       }
-      
+
       // For background tracking (if needed)
       if (options.background) {
-        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+        const { status: backgroundStatus } =
+          await Location.requestBackgroundPermissionsAsync();
         if (backgroundStatus !== 'granted') {
           console.warn('Background location permission not granted');
         }
       }
-      
+
       return true;
     } catch (err: any) {
       setError(err.message);
@@ -64,34 +69,35 @@ export default function useLocation(options: UseLocationOptions = {}): UseLocati
     }
   };
 
-  const getInitialLocation = async (): Promise<Location.LocationObject | null> => {
-    try {
-      const hasPermission = await requestPermissions();
-      
-      if (!hasPermission) {
+  const getInitialLocation =
+    async (): Promise<Location.LocationObject | null> => {
+      try {
+        const hasPermission = await requestPermissions();
+
+        if (!hasPermission) {
+          return null;
+        }
+
+        const currentLocation = await Location.getCurrentPositionAsync({
+          accuracy: mergedOptions.accuracy,
+        });
+
+        setLocation(currentLocation);
+        return currentLocation;
+      } catch (err: any) {
+        setError(err.message);
         return null;
       }
-      
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: mergedOptions.accuracy,
-      });
-      
-      setLocation(currentLocation);
-      return currentLocation;
-    } catch (err: any) {
-      setError(err.message);
-      return null;
-    }
-  };
+    };
 
   const startTracking = async (): Promise<boolean> => {
     try {
       const hasPermission = await requestPermissions();
-      
+
       if (!hasPermission) {
         return false;
       }
-      
+
       watchId.current = await Location.watchPositionAsync(
         {
           accuracy: mergedOptions.accuracy,
@@ -100,9 +106,9 @@ export default function useLocation(options: UseLocationOptions = {}): UseLocati
         },
         (newLocation: Location.LocationObject) => {
           setLocation(newLocation);
-        }
+        },
       );
-      
+
       setTracking(true);
       return true;
     } catch (err: any) {
@@ -129,5 +135,5 @@ export default function useLocation(options: UseLocationOptions = {}): UseLocati
     getInitialLocation,
     startTracking,
     stopTracking,
-  }
+  };
 }

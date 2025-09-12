@@ -1,10 +1,13 @@
 # Registration Error Fix Guide
 
 ## Problem
+
 The registration functionality is failing because the Supabase URL in your `.env` file is pointing to a non-existent Supabase project.
 
 ## Current Configuration Issue
+
 Your `.env` file contains:
+
 ```
 EXPO_PUBLIC_SUPABASE_URL=https://igzlopjmcbovgpmngcml.supabase.com
 EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
@@ -34,6 +37,7 @@ The URL `https://igzlopjmcbovgpmngcml.supabase.com` does not exist, which causes
    - Copy the "anon public" key
 
 4. **Update Your .env File**
+
    ```
    EXPO_PUBLIC_SUPABASE_URL=your_actual_project_url_here
    EXPO_PUBLIC_SUPABASE_ANON_KEY=your_actual_anon_key_here
@@ -54,11 +58,13 @@ If you want to test the app without setting up Supabase:
 ### Option 3: Use Local Supabase (Advanced)
 
 1. **Install Supabase CLI**
+
    ```bash
    npm install -g supabase
    ```
 
 2. **Initialize Local Project**
+
    ```bash
    supabase init
    supabase start
@@ -92,6 +98,7 @@ If you want to test the app without setting up Supabase:
 ## Need Help?
 
 If you continue experiencing issues:
+
 1. Check the browser console for specific error messages
 2. Verify your internet connection
 3. Ensure the Supabase project is active and not paused

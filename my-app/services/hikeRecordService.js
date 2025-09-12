@@ -7,14 +7,18 @@ const HIKE_RECORDS_KEY = 'hike_records_';
 
 // Get the current user's ID
 const getCurrentUserId = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
   return session?.user?.id;
 };
 
 // Get the storage key for the current user
 const getUserStorageKey = async () => {
   const userId = await getCurrentUserId();
-  if (!userId) throw new Error('User is not authenticated');
+  if (!userId) {
+    throw new Error('User is not authenticated');
+  }
   return `${HIKE_RECORDS_KEY}${userId}`;
 };
 
@@ -22,17 +26,21 @@ const getUserStorageKey = async () => {
 export const getHikeRecords = async () => {
   try {
     const userId = await getCurrentUserId();
-    if (!userId) return [];
-    
+    if (!userId) {
+      return [];
+    }
+
     // Fetch from Supabase
     const { data, error } = await supabase
       .from('activities')
       .select('*')
       .eq('user_id', userId)
       .order('date', { ascending: false });
-      
-    if (error) throw error;
-    
+
+    if (error) {
+      throw error;
+    }
+
     return data;
   } catch (error) {
     console.error('Error fetching hike records:', error);
@@ -44,17 +52,21 @@ export const getHikeRecords = async () => {
 };
 
 // Mock implementation to replace actual API calls for now
-export const saveHikeRecord = async (hikeData) => {
+export const saveHikeRecord = async hikeData => {
   console.log('Mock server save - no actual API call made');
-  console.log('Hike data that would be sent:', hikeData.date, `${hikeData.stats.distance}m`);
-  
+  console.log(
+    'Hike data that would be sent:',
+    hikeData.date,
+    `${hikeData.stats.distance}m`,
+  );
+
   // Return a successful response without making actual network request
   return {
     id: Date.now(),
     success: true,
-    message: 'Hike saved successfully (mock)'
+    message: 'Hike saved successfully (mock)',
   };
-  
+
   /* 
   // COMMENTED OUT - Real implementation for when API is ready
   try {
@@ -79,12 +91,14 @@ export const saveHikeRecord = async (hikeData) => {
 };
 
 // Delete a hike record by ID
-export const deleteHikeRecord = async (hikeId) => {
+export const deleteHikeRecord = async hikeId => {
   try {
     const storageKey = await getUserStorageKey();
     const existingRecords = await getHikeRecords();
-    const updatedRecords = existingRecords.filter(record => record.id !== hikeId);
-    
+    const updatedRecords = existingRecords.filter(
+      record => record.id !== hikeId,
+    );
+
     await AsyncStorage.setItem(storageKey, JSON.stringify(updatedRecords));
     return true;
   } catch (error) {
@@ -94,7 +108,7 @@ export const deleteHikeRecord = async (hikeId) => {
 };
 
 // Get a single hike record by ID
-export const getHikeRecordById = async (hikeId) => {
+export const getHikeRecordById = async hikeId => {
   try {
     const records = await getHikeRecords();
     return records.find(record => record.id === hikeId) || null;

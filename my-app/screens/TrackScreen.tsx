@@ -1,9 +1,20 @@
-import React from 'react'
-import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, StatusBar, Platform } from 'react-native'
-import { createStackNavigator, StackNavigationProp } from '@react-navigation/stack'
-import { Ionicons, MaterialIcons } from '@expo/vector-icons'
-import TrackingScreen from './TrackingScreen'
-import HikeHistoryScreen from './HikeHistoryScreen'
+import React from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
+  Platform,
+} from 'react-native';
+import {
+  createStackNavigator,
+  StackNavigationProp,
+} from '@react-navigation/stack';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import TrackingScreen from './TrackingScreen';
+import HikeHistoryScreen from './HikeHistoryScreen';
 
 type TrackStackParamList = {
   TrackHome: undefined;
@@ -11,68 +22,75 @@ type TrackStackParamList = {
   HikeHistory: undefined;
 };
 
-type TrackHomeScreenNavigationProp = StackNavigationProp<TrackStackParamList, 'TrackHome'>;
+type TrackHomeScreenNavigationProp = StackNavigationProp<
+  TrackStackParamList,
+  'TrackHome'
+>;
 
 interface TrackHomeScreenProps {
   navigation: TrackHomeScreenNavigationProp;
 }
 
-const Stack = createStackNavigator()
+const Stack = createStackNavigator();
 
 function TrackHomeScreen({ navigation }: TrackHomeScreenProps) {
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
-      
+      <StatusBar barStyle='light-content' backgroundColor='#2E7D32' />
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Track Activity</Text>
       </View>
-      
+
       <View style={styles.content}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.optionCard}
           onPress={() => navigation.navigate('TrackingScreen')}
         >
           <View style={styles.iconContainer}>
-            <Ionicons name="footsteps" size={32} color="#2E7D32" />
+            <Ionicons name='footsteps' size={32} color='#2E7D32' />
           </View>
           <View style={styles.optionInfo}>
             <Text style={styles.optionTitle}>Start Tracking</Text>
-            <Text style={styles.optionDescription}>Track your hike with GPS, measure distance, pace and more</Text>
+            <Text style={styles.optionDescription}>
+              Track your hike with GPS, measure distance, pace and more
+            </Text>
           </View>
-          <MaterialIcons name="chevron-right" size={24} color="#999" />
+          <MaterialIcons name='chevron-right' size={24} color='#999' />
         </TouchableOpacity>
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.optionCard}
           onPress={() => navigation.navigate('HikeHistory')}
         >
           <View style={styles.iconContainer}>
-            <Ionicons name="time" size={32} color="#2E7D32" />
+            <Ionicons name='time' size={32} color='#2E7D32' />
           </View>
           <View style={styles.optionInfo}>
             <Text style={styles.optionTitle}>Hiking History</Text>
-            <Text style={styles.optionDescription}>View your past hikes, routes and stats</Text>
+            <Text style={styles.optionDescription}>
+              View your past hikes, routes and stats
+            </Text>
           </View>
-          <MaterialIcons name="chevron-right" size={24} color="#999" />
+          <MaterialIcons name='chevron-right' size={24} color='#999' />
         </TouchableOpacity>
       </View>
     </SafeAreaView>
-  )
+  );
 }
 
 export default function TrackScreen() {
   return (
     <Stack.Navigator
       screenOptions={{
-        headerShown: false
+        headerShown: false,
       }}
     >
-      <Stack.Screen name="TrackHome" component={TrackHomeScreen} />
-      <Stack.Screen name="TrackingScreen" component={TrackingScreen} />
-      <Stack.Screen name="HikeHistory" component={HikeHistoryScreen} />
+      <Stack.Screen name='TrackHome' component={TrackHomeScreen} />
+      <Stack.Screen name='TrackingScreen' component={TrackingScreen} />
+      <Stack.Screen name='HikeHistory' component={HikeHistoryScreen} />
     </Stack.Navigator>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
@@ -134,4 +152,4 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 20,
   },
-})
+});

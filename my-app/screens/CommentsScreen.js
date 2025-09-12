@@ -10,7 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
 } from 'react-native';
 import { supabase } from '../services/supabaseClient';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,7 +35,9 @@ export default function CommentsScreen({ route, navigation }) {
   }, []);
 
   async function getUser() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     setUser(user);
   }
 
@@ -43,8 +45,7 @@ export default function CommentsScreen({ route, navigation }) {
     setPostLoading(true);
     try {
       // First, log the postId to debug
-      console.log("Fetching post with ID:", postId);
-      
+
       const { data: postData, error: postError } = await supabase
         .from('posts')
         .select('*')
@@ -53,13 +54,13 @@ export default function CommentsScreen({ route, navigation }) {
 
       if (postError) {
         console.error('Error fetching post:', postError);
-        
+
         // Handle the "no rows" error more gracefully
         if (postError.code === 'PGRST116') {
           Alert.alert(
             'Post Not Found',
             'This post may have been deleted or is no longer available.',
-            [{ text: 'Go Back', onPress: () => navigation.goBack() }]
+            [{ text: 'Go Back', onPress: () => navigation.goBack() }],
           );
         }
         setPostLoading(false);
@@ -75,7 +76,9 @@ export default function CommentsScreen({ route, navigation }) {
 
       setPost({
         ...postData,
-        profiles: profileError ? { username: 'User', avatar_url: null } : profileData
+        profiles: profileError
+          ? { username: 'User', avatar_url: null }
+          : profileData,
       });
       setPostLoading(false);
     } catch (err) {
@@ -102,18 +105,22 @@ export default function CommentsScreen({ route, navigation }) {
       }
 
       // For each comment, get the user profile separately
-      const enrichedComments = await Promise.all(commentData.map(async (comment) => {
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('username, avatar_url')
-          .eq('id', comment.user_id)
-          .single();
+      const enrichedComments = await Promise.all(
+        commentData.map(async comment => {
+          const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('username, avatar_url')
+            .eq('id', comment.user_id)
+            .single();
 
-        return {
-          ...comment,
-          profiles: profileError ? { username: 'User', avatar_url: null } : profileData
-        };
-      }));
+          return {
+            ...comment,
+            profiles: profileError
+              ? { username: 'User', avatar_url: null }
+              : profileData,
+          };
+        }),
+      );
 
       setComments(enrichedComments);
     } catch (err) {
@@ -124,7 +131,9 @@ export default function CommentsScreen({ route, navigation }) {
   }
 
   async function addComment() {
-    if (!newComment.trim()) return;
+    if (!newComment.trim()) {
+      return;
+    }
     if (!user) {
       Alert.alert('Authentication Required', 'Please log in to comment');
       return;
@@ -132,14 +141,13 @@ export default function CommentsScreen({ route, navigation }) {
 
     setPosting(true);
     try {
-      const { data, error } = await supabase
-        .from('comments')
-        .insert([{
+      const { data, error } = await supabase.from('comments').insert([
+        {
           post_id: postId,
           user_id: user.id,
-          content: newComment.trim()
-        }])
-        .select(`
+          content: newComment.trim(),
+        },
+      ]).select(`
           *,
           profiles:user_id (username, avatar_url)
         `);
@@ -178,69 +186,74 @@ export default function CommentsScreen({ route, navigation }) {
                 console.error('Error deleting comment:', error);
                 Alert.alert('Error', 'Failed to delete comment');
               } else {
-                setComments(comments.filter(comment => comment.id !== commentId));
+                setComments(
+                  comments.filter(comment => comment.id !== commentId),
+                );
               }
             } catch (err) {
               console.error('Unexpected error:', err);
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   }
 
   async function checkPostExists() {
     try {
-      console.log("Checking if post exists with ID:", postId);
-      
       // Get all posts to see what's in the database
       const { data: allPosts, error: postsError } = await supabase
         .from('posts')
         .select('id, content')
         .limit(5);
-      
+
       if (postsError) {
-        console.error("Error fetching posts list:", postsError);
+        console.error('Error fetching posts list:', postsError);
       } else {
-        console.log("Available posts in database:", allPosts);
+        console.log('Posts fetched successfully');
       }
-      
+
       // Check if we have valid UUID
-      const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postId);
-      console.log("Is valid UUID format:", isValidUUID);
-      
+      const isValidUUID =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          postId,
+        );
     } catch (err) {
-      console.error("Error in checkPostExists:", err);
+      console.error('Error in checkPostExists:', err);
     }
   }
 
   function renderCommentItem({ item }) {
     const isOwnComment = user && item.user_id === user.id;
-    
+
     return (
       <View style={styles.commentItem}>
-        <Image 
-          source={{ 
-            uri: item.profiles?.avatar_url || 'https://www.gravatar.com/avatar/?d=mp' 
-          }} 
-          style={styles.avatar} 
+        <Image
+          source={{
+            uri:
+              item.profiles?.avatar_url ||
+              'https://www.gravatar.com/avatar/?d=mp',
+          }}
+          style={styles.avatar}
         />
         <View style={styles.commentContent}>
           <View style={styles.commentHeader}>
-            <Text style={styles.username}>{item.profiles?.username || 'User'}</Text>
+            <Text style={styles.username}>
+              {item.profiles?.username || 'User'}
+            </Text>
             <Text style={styles.timestamp}>
               {new Date(item.created_at).toLocaleDateString()}
             </Text>
           </View>
           <Text style={styles.commentText}>{item.content}</Text>
         </View>
-        
+
         {isOwnComment && (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.deleteButton}
             onPress={() => deleteComment(item.id)}
           >
-            <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+            <Ionicons name='trash-outline' size={18} color='#FF3B30' />
           </TouchableOpacity>
         )}
       </View>
@@ -248,25 +261,31 @@ export default function CommentsScreen({ route, navigation }) {
   }
 
   function renderPostPreview() {
-    if (!post) return null;
-    
+    if (!post) {
+      return null;
+    }
+
     return (
       <View style={styles.postPreview}>
         <View style={styles.postHeader}>
-          <Image 
-            source={{ 
-              uri: post.profiles?.avatar_url || 'https://www.gravatar.com/avatar/?d=mp' 
-            }} 
-            style={styles.postAvatar} 
+          <Image
+            source={{
+              uri:
+                post.profiles?.avatar_url ||
+                'https://www.gravatar.com/avatar/?d=mp',
+            }}
+            style={styles.postAvatar}
           />
           <View>
-            <Text style={styles.postUsername}>{post.profiles?.username || 'User'}</Text>
+            <Text style={styles.postUsername}>
+              {post.profiles?.username || 'User'}
+            </Text>
             <Text style={styles.postTimestamp}>
               {new Date(post.created_at).toLocaleDateString()}
             </Text>
           </View>
         </View>
-        
+
         {post.content && (
           <Text style={styles.postContent} numberOfLines={2}>
             {post.content}
@@ -279,28 +298,28 @@ export default function CommentsScreen({ route, navigation }) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#333" />
+          <Ionicons name='arrow-back' size={24} color='#333' />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Comments</Text>
         <View style={styles.headerRight} />
       </View>
-      
+
       {postLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator color="#2E7D32" />
+          <ActivityIndicator color='#2E7D32' />
           <Text style={styles.loadingText}>Loading post...</Text>
         </View>
       ) : post ? (
         renderPostPreview()
       ) : (
         <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle-outline" size={40} color="#FF3B30" />
+          <Ionicons name='alert-circle-outline' size={40} color='#FF3B30' />
           <Text style={styles.errorText}>Post not found</Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.goBackButton}
             onPress={() => navigation.goBack()}
           >
@@ -308,14 +327,14 @@ export default function CommentsScreen({ route, navigation }) {
           </TouchableOpacity>
         </View>
       )}
-      
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flexOne}
         keyboardVerticalOffset={90}
       >
         {loading ? (
-          <ActivityIndicator style={styles.loader} color="#2E7D32" />
+          <ActivityIndicator style={styles.loader} color='#2E7D32' />
         ) : (
           <FlatList
             data={comments}
@@ -324,36 +343,48 @@ export default function CommentsScreen({ route, navigation }) {
             contentContainerStyle={styles.commentsList}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
-                <Ionicons name="chatbubble-outline" size={50} color="#ccc" />
+                <Ionicons name='chatbubble-outline' size={50} color='#ccc' />
                 <Text style={styles.emptyText}>No comments yet</Text>
-                <Text style={styles.emptySubtext}>Be the first to comment!</Text>
+                <Text style={styles.emptySubtext}>
+                  Be the first to comment!
+                </Text>
               </View>
             }
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={10}
+            updateCellsBatchingPeriod={50}
+            initialNumToRender={15}
+            windowSize={10}
+            getItemLayout={(data, index) => ({
+              length: 80,
+              offset: 80 * index,
+              index,
+            })}
           />
         )}
-        
+
         <View style={styles.inputContainer}>
           <TextInput
             ref={inputRef}
             style={styles.input}
-            placeholder="Add a comment..."
-            placeholderTextColor="#888"
+            placeholder='Add a comment...'
+            placeholderTextColor='#888'
             value={newComment}
             onChangeText={setNewComment}
             multiline
           />
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
-              styles.sendButton, 
-              (!newComment.trim() || posting) && styles.sendButtonDisabled
+              styles.sendButton,
+              (!newComment.trim() || posting) && styles.sendButtonDisabled,
             ]}
             onPress={addComment}
             disabled={!newComment.trim() || posting}
           >
             {posting ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator size='small' color='#fff' />
             ) : (
-              <Ionicons name="send" size={18} color="#FFF" />
+              <Ionicons name='send' size={18} color='#FFF' />
             )}
           </TouchableOpacity>
         </View>
@@ -549,5 +580,5 @@ const styles = StyleSheet.create({
   goBackButtonText: {
     color: '#FFF',
     fontWeight: 'bold',
-  }
+  },
 });

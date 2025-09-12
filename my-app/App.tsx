@@ -1,12 +1,34 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  Platform,
+  AppState,
+  AppStateStatus,
+  View,
+  Text,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
+import * as Linking from 'expo-linking';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 import { supabase } from './services/supabaseClient';
-import * as Linking from 'expo-linking';
-import * as SecureStore from 'expo-secure-store';
+import PlatformStorage from './utils/platformStorage';
 import { linking } from './utils/linking';
 import { Session } from '@supabase/supabase-js';
+import {
+  networkManager,
+  preloadCriticalData,
+} from './utils/loadingOptimization';
+import EnhancedErrorBoundary from './components/EnhancedErrorBoundary';
+import { LoadingScreen } from './components/LoadingScreen';
+import PreloaderScreen from './components/PreloaderScreen';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ProfileProvider } from './contexts/ProfileContext';
+import {
+  PerformanceMonitor,
+  runAfterInteractions,
+} from './utils/performanceOptimizations';
+import { performanceMonitor } from './utils/performanceMonitor';
 
 // Navigation types
 export type RootStackParamList = {
@@ -14,9 +36,10 @@ export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   EmailConfirmation: { email: string };
+  EmailConfirmationSuccess: undefined;
   Posts: undefined;
   Comments: { postId: string };
-  Profile: { userId?: string };
+  Profile: { userId?: string; refresh?: boolean };
   EditProfile: undefined;
   ChangePassword: undefined;
   HikingSpotDetails: { spot: any };
@@ -28,35 +51,69 @@ export type RootStackParamList = {
   HikeDetail: { hikeId: string };
   ActivityComments: { activityId: string };
   SaveConfirmation: { hikeId: string };
+  InteractiveMap: undefined;
+  Track: undefined;
+  Favorites: undefined;
 };
 
-// Import screens
-import LoginScreen from './screens/LoginScreen';
-import RegisterScreen from './screens/RegisterScreen';
-import HomeScreen from './screens/HomeScreen';
-import HikingSpotDetailsScreen from './screens/HikingSpotDetailsScreen';
-import ActivityDetailsScreen from './screens/ActivityDetailsScreen';
-import TrackScreen from './screens/TrackScreen';
-import TrackingScreen from './screens/TrackingScreen';
-import HikeHistoryScreen from './screens/HikeHistoryScreen';
-import EmailConfirmationScreen from './screens/EmailConfirmationScreen';
-import PostsScreen from './screens/PostsScreen';
-import CommentsScreen from './screens/CommentsScreen';
-import ProfileScreen from './screens/ProfileScreen';
-import EditProfileScreen from './screens/EditProfileScreen';
-import ChangePasswordScreen from './screens/ChangePasswordScreen';
-import MediaViewerScreen from './screens/MediaViewerScreen';
-import SaveActivityScreen from './screens/SaveActivityScreen';
-import HikeDetailScreen from './screens/HikeDetailScreen';
-import ActivityCommentsScreen from './screens/ActivityCommentsScreen';
-import SaveConfirmationScreen from './screens/SaveConfirmationScreen';
+// Lazy-loaded screen imports for better performance
+const LoginScreen = React.lazy(() => import('./screens/LoginScreen'));
+const RegisterScreen = React.lazy(() => import('./screens/RegisterScreen'));
+const HomeScreen = React.lazy(() => import('./screens/HomeScreen'));
+const EmailConfirmationScreen = React.lazy(
+  () => import('./screens/EmailConfirmationScreen'),
+);
+const EmailConfirmationSuccessScreen = React.lazy(
+  () => import('./screens/EmailConfirmationSuccessScreen'),
+);
+const SaveActivityScreen = React.lazy(
+  () => import('./screens/SaveActivityScreen'),
+);
+const HikeHistoryScreen = React.lazy(
+  () => import('./screens/HikeHistoryScreen'),
+);
+const ProfileScreen = React.lazy(() => import('./screens/ProfileScreen'));
+const HikingSpotDetailsScreen = React.lazy(
+  () => import('./screens/HikingSpotDetailsScreen'),
+);
+const ActivityDetailsScreen = React.lazy(
+  () => import('./screens/ActivityDetailsScreen'),
+);
+const TrackScreen = React.lazy(() => import('./screens/TrackScreen'));
+const TrackingScreen = React.lazy(() => import('./screens/TrackingScreen'));
+const PostsScreen = React.lazy(() => import('./screens/PostsScreen'));
+const CommentsScreen = React.lazy(() => import('./screens/CommentsScreen'));
+const EditProfileScreen = React.lazy(
+  () => import('./screens/EditProfileScreen'),
+);
+const ChangePasswordScreen = React.lazy(
+  () => import('./screens/ChangePasswordScreen'),
+);
+const MediaViewerScreen = React.lazy(
+  () => import('./screens/MediaViewerScreen'),
+);
+const HikeDetailScreen = React.lazy(() => import('./screens/HikeDetailScreen'));
+const ActivityCommentsScreen = React.lazy(
+  () => import('./screens/ActivityCommentsScreen'),
+);
+const SaveConfirmationScreen = React.lazy(
+  () => import('./screens/SaveConfirmationScreen'),
+);
+const InteractiveMapScreen = React.lazy(
+  () => import('./screens/InteractiveTrailMapScreen'),
+);
+const FavoritesScreen = React.lazy(() => import('./screens/FavoritesScreen'));
+
+// Individual hiking spot screens removed - using unified HikingSpotDetailsScreen instead
+
+// Removed LazyScreen wrapper since we're using direct imports
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 // Helper function to store auth tokens securely
 async function saveToken(key: string, value: string): Promise<void> {
   try {
-    await SecureStore.setItemAsync(key, value);
+    await PlatformStorage.setItemAsync(key, value);
   } catch (error) {
     console.log('Error saving token:', error);
   }
@@ -65,117 +122,120 @@ async function saveToken(key: string, value: string): Promise<void> {
 // Helper function to retrieve auth tokens
 async function getToken(key: string): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync(key);
+    return await PlatformStorage.getItemAsync(key);
   } catch (error) {
     console.log('Error getting token:', error);
     return null;
   }
 }
 
-export default function App(): JSX.Element {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+interface AppContentProps {
+  session: any;
+  loading: boolean;
+}
 
-  // Initialize Supabase auth with stored tokens on startup
+function AppContent({ session, loading }: AppContentProps): React.JSX.Element {
+  const [isReady, setIsReady] = useState(false);
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
+
+  // Initialize performance monitoring and preload critical data
   useEffect(() => {
-    async function initializeAuth() {
+    async function initializePerformance() {
+      PerformanceMonitor.startTimer('app_initialization');
+
       try {
-        // Try to get stored tokens
-        const accessToken = await getToken('supabase.access.token');
-        const refreshToken = await getToken('supabase.refresh.token');
-        
-        if (accessToken && refreshToken) {
-          // If we have tokens, try to set the session
-          const { data, error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-          });
-          
-          if (error) {
-            console.log('Session restore error:', error.message);
-            // Clear invalid tokens
-            await SecureStore.deleteItemAsync('supabase.access.token');
-            await SecureStore.deleteItemAsync('supabase.refresh.token');
-          } else if (data?.session) {
-            console.log('Session restored successfully');
-            setSession(data.session);
-          }
+        // Defer critical data preloading to avoid blocking initial render
+        if (session) {
+          setTimeout(() => {
+            preloadCriticalData().catch(error => {
+              console.error('Preload error:', error);
+            });
+          }, 100);
         }
-        
-        // If no stored tokens or session restore failed, check for active session
-        const { data } = await supabase.auth.getSession();
-        if (data?.session) {
-          setSession(data.session);
-          
-          // Save the valid tokens
-          await saveToken('supabase.access.token', data.session.access_token);
-          await saveToken('supabase.refresh.token', data.session.refresh_token);
-        }
-      } catch (e) {
-        console.error('Auth initialization error:', e);
-      } finally {
-        setLoading(false);
+
+        PerformanceMonitor.endTimer('app_initialization');
+      } catch (error) {
+        console.warn('Performance initialization error:', error);
+        PerformanceMonitor.endTimer('app_initialization');
       }
     }
-    
-    initializeAuth();
-    
-    // Set up auth state change listener
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, newSession) => {
-        console.log('Auth event:', event);
-        
-        setSession(newSession);
-        
-        // When a new session is created, store the tokens
-        if (newSession) {
-          await saveToken('supabase.access.token', newSession.access_token);
-          await saveToken('supabase.refresh.token', newSession.refresh_token);
-        } else {
-          // When session is ended, clear tokens
-          await SecureStore.deleteItemAsync('supabase.access.token');
-          await SecureStore.deleteItemAsync('supabase.refresh.token');
-        }
-      }
-    );
-    
-    return () => {
-      if (authListener && authListener.subscription) {
-        authListener.subscription.unsubscribe();
-      }
-    };
-  }, []);
+
+    initializePerformance();
+
+    // Log performance metrics after app loads
+    runAfterInteractions(() => {
+      setTimeout(() => {
+        PerformanceMonitor.logMetrics();
+      }, 3000);
+    });
+  }, [session]);
+
+  useEffect(() => {
+    if (!loading) {
+      // Small delay to ensure smooth transition
+      setTimeout(() => setIsReady(true), 200);
+    }
+  }, [loading]);
+
+  const handleAssetsLoaded = () => {
+    setAssetsLoaded(true);
+  };
+
+  // State to track if we should show email confirmation success
+  const [showEmailConfirmationSuccess, setShowEmailConfirmationSuccess] =
+    useState<boolean>(false);
 
   // Simplified deep link handler
   const handleDeepLink = async ({ url }: { url: string }): Promise<void> => {
-    if (!url) return;
-    
-    console.log("Received deep link:", url);
-    
+    if (!url) {
+      return;
+    }
+
+    console.log('Received deep link:', url);
+
     if (url.includes('auth/callback') || url.includes('login')) {
       try {
         const parsedUrl = Linking.parse(url);
-        
+
         if (parsedUrl.queryParams?.access_token) {
-          const accessToken = Array.isArray(parsedUrl.queryParams.access_token) 
-            ? parsedUrl.queryParams.access_token[0] 
+          const accessToken = Array.isArray(parsedUrl.queryParams.access_token)
+            ? parsedUrl.queryParams.access_token[0]
             : parsedUrl.queryParams.access_token;
-          const refreshToken = Array.isArray(parsedUrl.queryParams.refresh_token) 
-            ? parsedUrl.queryParams.refresh_token[0] 
+          const refreshToken = Array.isArray(
+            parsedUrl.queryParams.refresh_token,
+          )
+            ? parsedUrl.queryParams.refresh_token[0]
             : parsedUrl.queryParams.refresh_token || '';
-            
+
           const { data, error } = await supabase.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken,
           });
-          
+
           if (!error && data?.session) {
-            console.log("Session established via deep link");
-            setSession(data.session);
+            console.log('Session established via deep link');
+            // Session will be automatically updated by AuthContext
+
+            // Check if this is an email confirmation
+            if (
+              url.includes('type=signup') ||
+              parsedUrl.queryParams?.type === 'signup'
+            ) {
+              console.log('Email confirmation detected via deep link');
+              setShowEmailConfirmationSuccess(true);
+
+              // Clear the flag after a short delay to allow navigation
+              setTimeout(() => {
+                setShowEmailConfirmationSuccess(false);
+              }, 100);
+            }
           }
+        } else {
+          // If no access token but this is an auth callback, it might be an error
+          console.log('Auth callback received but no access token found');
         }
       } catch (e) {
-        console.error("Error handling deep link:", e);
+        console.error('Error handling deep link:', e);
       }
     }
   };
@@ -183,82 +243,309 @@ export default function App(): JSX.Element {
   useEffect(() => {
     // Handle deep links
     const subscription = Linking.addEventListener('url', handleDeepLink);
-    
+
     // Check for initial link
     Linking.getInitialURL().then(url => {
-      if (url) handleDeepLink({ url });
+      if (url) {
+        handleDeepLink({ url });
+      }
     });
-    
+
     return () => subscription.remove();
   }, []);
 
-  if (loading) {
+  if (loading || !isReady) {
+    return <LoadingScreen message='Preparing your hiking adventure...' />;
+  }
+
+  if (!assetsLoaded) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2E7D32" />
-        <Text style={styles.loadingText}>Loading Ascentra...</Text>
-      </View>
+      <PreloaderScreen onLoadingComplete={handleAssetsLoaded}>
+        <></>
+      </PreloaderScreen>
     );
   }
 
   // For debugging purposes, log the screens we have available
-  console.log("Available screens in navigator:", [
-    "Home", "HikingSpotDetails", "ActivityDetails", 
-    "Tracking", "HikeHistory", "SaveActivity", "Login", "Register", "EmailConfirmation",
-    "Posts", "Comments", "Profile", "EditProfile", "ChangePassword", "MediaViewer"
+  console.log('Available screens in navigator:', [
+    'Home',
+    'HikingSpotDetails',
+    'ActivityDetails',
+    'Tracking',
+    'HikeHistory',
+    'SaveActivity',
+    'Login',
+    'Register',
+    'EmailConfirmation',
+    'Posts',
+    'Comments',
+    'Profile',
+    'EditProfile',
+    'ChangePassword',
+    'MediaViewer',
   ]);
 
   return (
     <NavigationContainer linking={linking}>
       <Stack.Navigator>
-        {session && session.user ? (
-          <>
-            <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Posts" component={PostsScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Comments" component={CommentsScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Profile" component={ProfileScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} options={{ headerShown: false }} />
-            <Stack.Screen 
-              name="HikingSpotDetails" 
-              component={HikingSpotDetailsScreen} 
+        {session ? (
+          showEmailConfirmationSuccess ? (
+            // Show email confirmation success screen first, then allow navigation to main app
+            <Stack.Screen
+              name='EmailConfirmationSuccess'
               options={{ headerShown: false }}
-            />
-            <Stack.Screen 
-              name="ActivityDetails" 
-              component={ActivityDetailsScreen} 
-              options={{ headerShown: false }} 
-            />
-            <Stack.Screen name="Tracking" component={TrackingScreen} options={{ headerShown: false }} />
-            <Stack.Screen 
-              name="HikeHistory" 
-              component={HikeHistoryScreen} 
-              options={{ headerShown: false }} 
-              initialParams={{ userId: null }} // Allow passing userId parameter
-            />
-            <Stack.Screen name="SaveActivity" component={SaveActivityScreen} options={{ headerShown: false }} />
-            <Stack.Screen 
-              name="MediaViewer" 
-              component={MediaViewerScreen} 
-              options={{ headerShown: false }} 
-            />
-            <Stack.Screen 
-              name="HikeDetail" 
-              component={HikeDetailScreen} 
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen name="ActivityComments" component={ActivityCommentsScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="SaveConfirmation" component={SaveConfirmationScreen} options={{ headerShown: false }} />
-          </>
+            >
+              {props => (
+                <React.Suspense
+                  fallback={<LoadingScreen message='Loading success...' />}
+                >
+                  <EmailConfirmationSuccessScreen {...props} />
+                </React.Suspense>
+              )}
+            </Stack.Screen>
+          ) : (
+            <>
+              {/* Core screens - individual Suspense boundaries */}
+              <Stack.Screen name='Home' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading home...' />}
+                  >
+                    <HomeScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='Posts' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading posts...' />}
+                  >
+                    <PostsScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='Comments' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading comments...' />}
+                  >
+                    <CommentsScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='Profile' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading profile...' />}
+                  >
+                    <ProfileScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='EditProfile' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading editor...' />}
+                  >
+                    <EditProfileScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen
+                name='ChangePassword'
+                options={{ headerShown: false }}
+              >
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading settings...' />}
+                  >
+                    <ChangePasswordScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              {/* Secondary screens - individual Suspense boundaries */}
+              <Stack.Screen
+                name='HikingSpotDetails'
+                options={{ headerShown: false }}
+              >
+                {props => (
+                  <React.Suspense
+                    fallback={
+                      <LoadingScreen message='Loading spot details...' />
+                    }
+                  >
+                    <HikingSpotDetailsScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen
+                name='ActivityDetails'
+                options={{ headerShown: false }}
+              >
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading activity...' />}
+                  >
+                    <ActivityDetailsScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='Tracking' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading tracker...' />}
+                  >
+                    <TrackingScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen
+                name='HikeHistory'
+                options={{ headerShown: false }}
+                initialParams={{ userId: null }}
+              >
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading history...' />}
+                  >
+                    <HikeHistoryScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen
+                name='SaveActivity'
+                options={{ headerShown: false }}
+              >
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Saving activity...' />}
+                  >
+                    <SaveActivityScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='MediaViewer' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading media...' />}
+                  >
+                    <MediaViewerScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='HikeDetail' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={
+                      <LoadingScreen message='Loading hike details...' />
+                    }
+                  >
+                    <HikeDetailScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen
+                name='ActivityComments'
+                options={{ headerShown: false }}
+              >
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading comments...' />}
+                  >
+                    <ActivityCommentsScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen
+                name='SaveConfirmation'
+                options={{ headerShown: false }}
+              >
+                {props => (
+                  <React.Suspense
+                    fallback={
+                      <LoadingScreen message='Loading confirmation...' />
+                    }
+                  >
+                    <SaveConfirmationScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen
+                name='InteractiveMap'
+                options={{ headerShown: false }}
+              >
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading map...' />}
+                  >
+                    <InteractiveMapScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='Track' options={{ headerShown: false }}>
+                {() => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading tracker...' />}
+                  >
+                    <TrackScreen />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name='Favorites' options={{ headerShown: false }}>
+                {props => (
+                  <React.Suspense
+                    fallback={<LoadingScreen message='Loading favorites...' />}
+                  >
+                    <FavoritesScreen {...props} />
+                  </React.Suspense>
+                )}
+              </Stack.Screen>
+            </>
+          )
         ) : (
           <>
-            <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
-            <Stack.Screen 
-              name="EmailConfirmation" 
-              component={EmailConfirmationScreen} 
-              options={{ headerShown: false }} 
-            />
+            <Stack.Screen name='Login' options={{ headerShown: false }}>
+              {props => (
+                <React.Suspense
+                  fallback={<LoadingScreen message='Loading login...' />}
+                >
+                  <LoginScreen {...props} />
+                </React.Suspense>
+              )}
+            </Stack.Screen>
+            <Stack.Screen name='Register' options={{ headerShown: false }}>
+              {props => (
+                <React.Suspense
+                  fallback={<LoadingScreen message='Loading registration...' />}
+                >
+                  <RegisterScreen {...props} />
+                </React.Suspense>
+              )}
+            </Stack.Screen>
+            <Stack.Screen
+              name='EmailConfirmation'
+              options={{ headerShown: false }}
+            >
+              {props => (
+                <React.Suspense
+                  fallback={<LoadingScreen message='Loading confirmation...' />}
+                >
+                  <EmailConfirmationScreen {...props} />
+                </React.Suspense>
+              )}
+            </Stack.Screen>
+            <Stack.Screen
+              name='EmailConfirmationSuccess'
+              options={{ headerShown: false }}
+            >
+              {props => (
+                <React.Suspense
+                  fallback={<LoadingScreen message='Loading success...' />}
+                >
+                  <EmailConfirmationSuccessScreen {...props} />
+                </React.Suspense>
+              )}
+            </Stack.Screen>
           </>
         )}
       </Stack.Navigator>
@@ -266,7 +553,37 @@ export default function App(): JSX.Element {
   );
 }
 
+function AppWrapper(): React.JSX.Element {
+  const { session, loading } = useAuth();
+
+  return <AppContent session={session} loading={loading} />;
+}
+
+export default function App(): React.JSX.Element {
+  return (
+    <EnhancedErrorBoundary
+      onError={(error, errorInfo) => {
+        console.error('App Error Boundary:', error, errorInfo);
+        performanceMonitor.recordInteraction(
+          'app_error_boundary',
+          Date.now() - Date.now(),
+        );
+      }}
+    >
+      <AuthProvider>
+        <ProfileProvider>
+          <AppWrapper />
+        </ProfileProvider>
+      </AuthProvider>
+    </EnhancedErrorBoundary>
+  );
+}
+
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -276,6 +593,6 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#2E7D32',
+    color: '#666',
   },
 });

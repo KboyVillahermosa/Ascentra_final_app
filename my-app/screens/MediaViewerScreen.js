@@ -1,5 +1,14 @@
 import React, { useState, useRef } from 'react';
-import { View, Image, StyleSheet, Dimensions, TouchableOpacity, StatusBar, ScrollView, Text } from 'react-native';
+import {
+  View,
+  Image,
+  StyleSheet,
+  Dimensions,
+  TouchableOpacity,
+  StatusBar,
+  ScrollView,
+  Text,
+} from 'react-native';
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -13,19 +22,22 @@ export default function MediaViewerScreen({ route, navigation }) {
   // Hide status bar when component mounts
   React.useEffect(() => {
     StatusBar.setHidden(true);
-    
+
     // Scroll to initial index when component mounts
     if (scrollViewRef.current && initialIndex > 0) {
       setTimeout(() => {
-        scrollViewRef.current.scrollTo({ x: width * initialIndex, animated: false });
+        scrollViewRef.current.scrollTo({
+          x: width * initialIndex,
+          animated: false,
+        });
       }, 100);
     }
-    
+
     return () => StatusBar.setHidden(false);
   }, []);
 
   // Handle scroll events to update active index
-  const handleScroll = (event) => {
+  const handleScroll = event => {
     const contentOffsetX = event.nativeEvent.contentOffset.x;
     const newIndex = Math.round(contentOffsetX / width);
     if (newIndex !== activeIndex) {
@@ -47,9 +59,8 @@ export default function MediaViewerScreen({ route, navigation }) {
             source={{ uri: item.url }}
             style={styles.media}
             useNativeControls
-            resizeMode="contain"
-            shouldPlay={index === activeIndex}
-            isLooping
+            resizeMode='contain'
+            shouldPlay
           />
         </View>
       );
@@ -59,7 +70,7 @@ export default function MediaViewerScreen({ route, navigation }) {
           <Image
             source={{ uri: item.url }}
             style={styles.media}
-            resizeMode="contain"
+            resizeMode='contain'
           />
         </View>
       );
@@ -72,7 +83,7 @@ export default function MediaViewerScreen({ route, navigation }) {
         style={styles.closeButton}
         onPress={() => navigation.goBack()}
       >
-        <Ionicons name="close" size={28} color="#FFF" />
+        <Ionicons name='close' size={28} color='#FFF' />
       </TouchableOpacity>
 
       {/* Check if media array exists and has items */}
@@ -92,7 +103,7 @@ export default function MediaViewerScreen({ route, navigation }) {
           <Text style={styles.errorText}>No media to display</Text>
         </View>
       )}
-      
+
       {media && media.length > 1 && (
         <View style={styles.pagination}>
           {media.map((_, index) => (
@@ -100,7 +111,7 @@ export default function MediaViewerScreen({ route, navigation }) {
               key={index}
               style={[
                 styles.paginationDot,
-                index === activeIndex ? styles.paginationDotActive : {}
+                index === activeIndex ? styles.paginationDotActive : {},
               ]}
             />
           ))}

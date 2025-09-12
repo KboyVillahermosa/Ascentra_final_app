@@ -1,114 +1,135 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  FlatList, 
-  TouchableOpacity, 
-  SafeAreaView, 
-  StatusBar, 
-  Platform, 
-  Alert, 
-  Modal, 
+import {
+  StyleSheet,
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
+  Platform,
+  Alert,
+  Modal,
   ActivityIndicator,
   Image,
-  Dimensions
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { formatDate, formatDistance, formatDuration, formatPace } from '../utils/formatters';
-import { 
-  getAllHikes, 
-  debugStorage, 
-  deleteHike, 
-  syncAllHikesToSupabase, 
-  syncHikeToSupabase, 
-  getCurrentUserId 
+import {
+  formatDate,
+  formatDistance,
+  formatDuration,
+  formatPace,
+} from '../utils/formatters';
+import {
+  getAllHikes,
+  debugStorage,
+  deleteHike,
+  syncAllHikesToSupabase,
+  syncHikeToSupabase,
+  getCurrentUserId,
 } from '../services/databaseService';
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import NetInfo from '@react-native-community/netinfo';
+import { useAuth } from '../contexts/AuthContext';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width - 32; // Account for margins and padding
 
 // Custom HikeHistoryItem component with map
-const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPress, onDelete }) => {
+const HikeHistoryItem = ({
+  hike,
+  onPress,
+  onMediaPress,
+  onOptionsPress,
+  onSyncPress,
+  onDelete,
+}) => {
   // Check if the hike has media files and route coordinates
-  const hasMedia = hike.media && Array.isArray(hike.media) && hike.media.length > 0;
-  const hasRoute = hike.routeCoordinates && Array.isArray(hike.routeCoordinates) && hike.routeCoordinates.length > 1;
-  
+  const hasMedia =
+    hike.media && Array.isArray(hike.media) && hike.media.length > 0;
+  const hasRoute =
+    hike.routeCoordinates &&
+    Array.isArray(hike.routeCoordinates) &&
+    hike.routeCoordinates.length > 1;
+
   // Calculate map region based on route coordinates
   const getMapRegion = () => {
-    if (!hasRoute) return {
-      latitude: 0,
-      longitude: 0,
-      latitudeDelta: 0.01,
-      longitudeDelta: 0.01
-    };
-    
+    if (!hasRoute) {
+      return {
+        latitude: 0,
+        longitude: 0,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
+    }
+
     // Find min/max coordinates to set boundaries
     let minLat = hike.routeCoordinates[0].latitude;
     let maxLat = hike.routeCoordinates[0].latitude;
     let minLng = hike.routeCoordinates[0].longitude;
     let maxLng = hike.routeCoordinates[0].longitude;
-    
+
     hike.routeCoordinates.forEach(coord => {
       minLat = Math.min(minLat, coord.latitude);
       maxLat = Math.max(maxLat, coord.latitude);
       minLng = Math.min(minLng, coord.longitude);
       maxLng = Math.max(maxLng, coord.longitude);
     });
-    
+
     // Add padding
     const latPadding = (maxLat - minLat) * 0.2;
     const lngPadding = (maxLng - minLng) * 0.2;
-    
+
     return {
       latitude: (minLat + maxLat) / 2,
       longitude: (minLng + maxLng) / 2,
-      latitudeDelta: Math.max((maxLat - minLat) + latPadding, 0.01),
-      longitudeDelta: Math.max((maxLng - minLng) + lngPadding, 0.01)
+      latitudeDelta: Math.max(maxLat - minLat + latPadding, 0.01),
+      longitudeDelta: Math.max(maxLng - minLng + lngPadding, 0.01),
     };
   };
-  
+
   // Function to render media thumbnails
   const renderMedia = () => {
-    if (!hasMedia) return null;
-    
+    if (!hasMedia) {
+      return null;
+    }
+
     // Determine how many thumbnails to show (max 3)
     const displayCount = Math.min(hike.media.length, 3);
     const remainingCount = hike.media.length - displayCount;
-    
+
     return (
       <View style={styles.mediaContainer}>
         {hike.media.slice(0, displayCount).map((media, index) => {
-          const isVideo = media.type === 'video' || 
-                         (media.uri && media.uri.endsWith('.mp4'));
-          
+          const isVideo =
+            media.type === 'video' || (media.uri && media.uri.endsWith('.mp4'));
+
           return (
-            <TouchableOpacity 
-              key={index} 
+            <TouchableOpacity
+              key={index}
               style={styles.mediaThumbnail}
               onPress={() => onMediaPress(hike.media, index)}
               activeOpacity={0.9}
             >
-              <Image 
-                source={{ uri: media.uri }} 
-                style={styles.mediaImage} 
-                resizeMode="cover"
+              <Image
+                source={{ uri: media.uri }}
+                style={styles.mediaImage}
+                resizeMode='cover'
               />
-              
+
               {isVideo && (
                 <View style={styles.videoIndicator}>
-                  <Ionicons name="play" size={16} color="white" />
+                  <Ionicons name='play' size={16} color='white' />
                 </View>
               )}
             </TouchableOpacity>
           );
         })}
-        
+
         {remainingCount > 0 && (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.mediaThumbnail, styles.moreMediaIndicator]}
             onPress={() => onMediaPress(hike.media, displayCount)}
           >
@@ -118,69 +139,76 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPr
       </View>
     );
   };
-  
+
   // Get activity icon based on type
   const getActivityIcon = () => {
-    switch(hike.activityType) {
-      case 'Trail Running': return 'walk';
-      case 'Mountain Biking': return 'bicycle';
-      case 'Backpacking': return 'pin';
-      case 'Rock Climbing': return 'trending-up';
-      case 'Snowshoeing': return 'snow';
-      case 'Exploring': return 'compass';
-      default: return 'footsteps';
+    switch (hike.activityType) {
+      case 'Trail Running':
+        return 'walk';
+      case 'Mountain Biking':
+        return 'bicycle';
+      case 'Backpacking':
+        return 'pin';
+      case 'Rock Climbing':
+        return 'trending-up';
+      case 'Snowshoeing':
+        return 'snow';
+      case 'Exploring':
+        return 'compass';
+      default:
+        return 'footsteps';
     }
   };
-  
+
   return (
-    <TouchableOpacity 
-      style={styles.hikeCard} 
+    <TouchableOpacity
+      style={styles.hikeCard}
       onPress={onPress}
       activeOpacity={0.9}
     >
       {/* Card header with activity type and menu */}
       <View style={styles.cardHeader}>
         <View style={styles.activityBadge}>
-          <Ionicons name={getActivityIcon()} size={16} color="white" />
+          <Ionicons name={getActivityIcon()} size={16} color='white' />
           <Text style={styles.activityBadgeText}>
             {hike.activityType || 'Hiking'}
           </Text>
         </View>
-        
+
         {/* Sync status indicator */}
         {hike.synced ? (
           <View style={styles.syncedBadge}>
-            <Ionicons name="cloud-done" size={16} color="white" />
+            <Ionicons name='cloud-done' size={16} color='white' />
           </View>
         ) : (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.notSyncedBadge}
             onPress={() => onSyncPress(hike.id)}
           >
-            <Ionicons name="cloud-upload" size={16} color="white" />
+            <Ionicons name='cloud-upload' size={16} color='white' />
           </TouchableOpacity>
         )}
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.optionsButton}
           onPress={onOptionsPress}
-          hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="ellipsis-horizontal" size={20} color="#666" />
+          <Ionicons name='ellipsis-horizontal' size={20} color='#666' />
         </TouchableOpacity>
       </View>
-      
+
       {/* Title and date */}
       <Text style={styles.hikeTitle}>{hike.title || 'Hiking Activity'}</Text>
       <Text style={styles.hikeDate}>{formatDate(hike.date)}</Text>
-      
+
       {/* Description if available */}
       {hike.description ? (
         <Text style={styles.hikeDescription} numberOfLines={2}>
           {hike.description}
         </Text>
       ) : null}
-      
+
       {/* Route Map Preview */}
       {hasRoute && (
         <View style={styles.mapPreviewContainer}>
@@ -198,22 +226,22 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPr
             <Polyline
               coordinates={hike.routeCoordinates}
               strokeWidth={7}
-              strokeColor="rgba(46, 125, 50, 0.3)" // Semi-transparent green
-              lineCap="round"
-              lineJoin="round"
+              strokeColor='rgba(46, 125, 50, 0.3)' // Semi-transparent green
+              lineCap='round'
+              lineJoin='round'
               zIndex={1}
             />
-            
+
             {/* Main route line */}
             <Polyline
               coordinates={hike.routeCoordinates}
               strokeWidth={4}
-              strokeColor="#2E7D32" // Solid green
-              lineCap="round"
-              lineJoin="round"
+              strokeColor='#2E7D32' // Solid green
+              lineCap='round'
+              lineJoin='round'
               zIndex={2}
             />
-            
+
             {/* Start marker */}
             <Marker
               coordinate={hike.routeCoordinates[0]}
@@ -223,10 +251,12 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPr
                 <View style={styles.startMarkerInner} />
               </View>
             </Marker>
-            
+
             {/* End marker */}
             <Marker
-              coordinate={hike.routeCoordinates[hike.routeCoordinates.length - 1]}
+              coordinate={
+                hike.routeCoordinates[hike.routeCoordinates.length - 1]
+              }
               anchor={{ x: 0.5, y: 0.5 }}
             >
               <View style={styles.endMarkerDot}>
@@ -234,84 +264,92 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPr
               </View>
             </Marker>
           </MapView>
-          
+
           <View style={styles.mapOverlay}>
-            <Ionicons name="map" size={16} color="white" />
+            <Ionicons name='map' size={16} color='white' />
           </View>
         </View>
       )}
-      
+
       {/* Media gallery */}
       {renderMedia()}
-      
+
       {/* Stats row */}
       <View style={styles.statsContainer}>
         <View style={styles.statItem}>
-          <Ionicons name="navigate" size={18} color="#2E7D32" />
+          <Ionicons name='navigate' size={18} color='#2E7D32' />
           <Text style={styles.statLabel}>Distance</Text>
           <Text style={styles.statValue}>{formatDistance(hike.distance)}</Text>
         </View>
-        
+
         <View style={styles.divider} />
-        
+
         <View style={styles.statItem}>
-          <Ionicons name="time" size={18} color="#2E7D32" />
+          <Ionicons name='time' size={18} color='#2E7D32' />
           <Text style={styles.statLabel}>Duration</Text>
           <Text style={styles.statValue}>{formatDuration(hike.duration)}</Text>
         </View>
-        
+
         <View style={styles.divider} />
-        
+
         <View style={styles.statItem}>
-          <Ionicons name="trending-up" size={18} color="#2E7D32" />
+          <Ionicons name='trending-up' size={18} color='#2E7D32' />
           <Text style={styles.statLabel}>Elevation</Text>
-          <Text style={styles.statValue}>{(hike.elevation || 0).toFixed(0)}m</Text>
+          <Text style={styles.statValue}>
+            {(hike.elevation || 0).toFixed(0)}m
+          </Text>
         </View>
       </View>
-      
+
       {/* Feeling badge if available */}
       {hike.feeling && (
         <View style={styles.feelingBadge}>
-          <Ionicons 
-            name={hike.feeling === 'Great' ? 'happy' : 
-                 hike.feeling === 'Good' ? 'smile' :
-                 hike.feeling === 'Okay' ? 'thumbs-up' :
-                 hike.feeling === 'Tired' ? 'sad' : 'thumbs-down'} 
-            size={14} 
-            color="#2E7D32" 
+          <Ionicons
+            name={
+              hike.feeling === 'Great'
+                ? 'happy'
+                : hike.feeling === 'Good'
+                  ? 'smile'
+                  : hike.feeling === 'Okay'
+                    ? 'thumbs-up'
+                    : hike.feeling === 'Tired'
+                      ? 'sad'
+                      : 'thumbs-down'
+            }
+            size={14}
+            color='#2E7D32'
           />
           <Text style={styles.feelingText}>Felt {hike.feeling}</Text>
         </View>
       )}
-      
+
       {/* Add action buttons */}
       <View style={styles.actionButtonsContainer}>
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => onPress()}
-        >
-          <Ionicons name="eye-outline" size={20} color="#2E7D32" />
+        <TouchableOpacity style={styles.actionButton} onPress={() => onPress()}>
+          <Ionicons name='eye-outline' size={20} color='#2E7D32' />
           <Text style={styles.actionButtonText}>View</Text>
         </TouchableOpacity>
-        
+
         <View style={styles.actionDivider} />
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.actionButton}
           onPress={() => onOptionsPress()}
         >
-          <Ionicons name="ellipsis-horizontal" size={20} color="#666" />
+          <Ionicons name='ellipsis-horizontal' size={20} color='#666' />
           <Text style={styles.actionButtonText}>More</Text>
         </TouchableOpacity>
-        
+
         <View style={styles.actionDivider} />
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={[styles.actionButton, styles.deleteButton]}
           onPress={() => onDelete()}
         >
-          <Ionicons name="trash-outline" size={20} color="#D32F2F" />
-          <Text style={[styles.actionButtonText, styles.deleteButtonText]}>Delete</Text>
+          <Ionicons name='trash-outline' size={20} color='#D32F2F' />
+          <Text style={[styles.actionButtonText, styles.deleteButtonText]}>
+            Delete
+          </Text>
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
@@ -319,14 +357,14 @@ const HikeHistoryItem = ({ hike, onPress, onMediaPress, onOptionsPress, onSyncPr
 };
 
 export default function HikeHistoryScreen({ navigation }) {
+  const { user, isAuthenticated } = useAuth();
   const [hikeRecords, setHikeRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedHikeId, setSelectedHikeId] = useState(null);
   const [isOnline, setIsOnline] = useState(true);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  
+
   // New state for media viewer
   const [mediaViewerVisible, setMediaViewerVisible] = useState(false);
   const [mediaItems, setMediaItems] = useState([]);
@@ -334,62 +372,45 @@ export default function HikeHistoryScreen({ navigation }) {
 
   useEffect(() => {
     fetchHikeRecords();
-    
+
     // Check network status
     const unsubscribeNet = NetInfo.addEventListener(state => {
       setIsOnline(state.isConnected);
     });
-    
-    // Check login status
-    const checkLoginStatus = async () => {
-      try {
-        const userId = await getCurrentUserId();
-        setIsLoggedIn(userId !== 'guest');
-      } catch (error) {
-        console.error('Error checking login status:', error);
-        setIsLoggedIn(false);
-      }
-    };
-    
-    checkLoginStatus();
-    
+
     // Refresh when the screen comes into focus
     const unsubscribeNav = navigation.addListener('focus', () => {
       fetchHikeRecords();
-      checkLoginStatus();
     });
-    
+
     return () => {
       unsubscribeNav();
       unsubscribeNet();
-    }
+    };
   }, [navigation]);
 
   const fetchHikeRecords = async () => {
     try {
       setLoading(true);
-      console.log('Fetching hikes from local storage...');
-      
+
       // Debug storage first
       await debugStorage();
-      
+
       // Get hikes from AsyncStorage using the existing function
       const hikes = await getAllHikes();
-      console.log(`Fetched ${hikes.length} hikes from local storage`);
-      
+
       // Debug media content
       hikes.forEach((hike, index) => {
-        console.log(`Hike #${index}: "${hike.title}" has ${hike.media && Array.isArray(hike.media) ? hike.media.length : 0} media items`);
         if (hike.media && Array.isArray(hike.media) && hike.media.length > 0) {
-          console.log(`First media URI: ${hike.media[0].uri}`);
+          // Media processing logic can be added here
         }
       });
-      
+
       // Sort by date (newest first)
       const sortedHikes = hikes.sort((a, b) => {
         return new Date(b.date) - new Date(a.date);
       });
-      
+
       setHikeRecords(sortedHikes);
     } catch (error) {
       console.error('Error fetching hike records:', error);
@@ -399,81 +420,94 @@ export default function HikeHistoryScreen({ navigation }) {
     }
   };
 
-  const handleDeleteHike = (hikeId) => {
+  const handleDeleteHike = hikeId => {
     setSelectedHikeId(hikeId);
     setDeleteModalVisible(true);
   };
 
-  const handleOptionsPress = (hikeId) => {
+  const handleOptionsPress = hikeId => {
     // Show options menu for this hike
-    Alert.alert(
-      'Hike Options',
-      'What would you like to do with this hike?',
-      [
-        { text: 'View Details', onPress: () => navigation.navigate('HikeDetail', { hikeId }) },
-        { text: 'Share', onPress: () => alert('Sharing feature coming soon!') },
-        { text: 'Delete', onPress: () => handleDeleteHike(hikeId), style: 'destructive' },
-        { text: 'Cancel', style: 'cancel' }
-      ]
-    );
+    Alert.alert('Hike Options', 'What would you like to do with this hike?', [
+      {
+        text: 'View Details',
+        onPress: () => navigation.navigate('HikeDetail', { hikeId }),
+      },
+      { text: 'Share', onPress: () => alert('Sharing feature coming soon!') },
+      {
+        text: 'Delete',
+        onPress: () => handleDeleteHike(hikeId),
+        style: 'destructive',
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
-  
+
   // Handler for opening media viewer
   const handleMediaPress = (media, index) => {
     setMediaItems(media);
     setInitialMediaIndex(index);
     setMediaViewerVisible(true);
   };
-  
+
   // Simple media modal component
   const MediaViewerModal = () => (
     <Modal
-      animationType="fade"
+      animationType='fade'
       transparent={false}
       visible={mediaViewerVisible}
       onRequestClose={() => setMediaViewerVisible(false)}
     >
       <View style={styles.mediaViewerContainer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.mediaViewerCloseBtn}
           onPress={() => setMediaViewerVisible(false)}
         >
-          <Ionicons name="close" size={28} color="white" />
+          <Ionicons name='close' size={28} color='white' />
         </TouchableOpacity>
-        
+
         {mediaItems.length > 0 && (
-          <Image 
-            source={{ uri: mediaItems[initialMediaIndex].uri }} 
+          <Image
+            source={{ uri: mediaItems[initialMediaIndex].uri }}
             style={styles.fullScreenMedia}
-            resizeMode="contain"
+            resizeMode='contain'
           />
         )}
-        
+
         {/* Navigation buttons for prev/next image */}
         <View style={styles.mediaNavigation}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.mediaNavButton}
-            onPress={() => setInitialMediaIndex(Math.max(0, initialMediaIndex - 1))}
+            onPress={() =>
+              setInitialMediaIndex(Math.max(0, initialMediaIndex - 1))
+            }
             disabled={initialMediaIndex === 0}
           >
-            <Ionicons 
-              name="chevron-back" 
-              size={32} 
-              color={initialMediaIndex === 0 ? "#555" : "white"} 
+            <Ionicons
+              name='chevron-back'
+              size={32}
+              color={initialMediaIndex === 0 ? '#555' : 'white'}
             />
           </TouchableOpacity>
-          
-          <Text style={styles.mediaCounter}>{initialMediaIndex + 1}/{mediaItems.length}</Text>
-          
-          <TouchableOpacity 
+
+          <Text style={styles.mediaCounter}>
+            {initialMediaIndex + 1}/{mediaItems.length}
+          </Text>
+
+          <TouchableOpacity
             style={styles.mediaNavButton}
-            onPress={() => setInitialMediaIndex(Math.min(mediaItems.length - 1, initialMediaIndex + 1))}
+            onPress={() =>
+              setInitialMediaIndex(
+                Math.min(mediaItems.length - 1, initialMediaIndex + 1),
+              )
+            }
             disabled={initialMediaIndex === mediaItems.length - 1}
           >
-            <Ionicons 
-              name="chevron-forward" 
-              size={32} 
-              color={initialMediaIndex === mediaItems.length - 1 ? "#555" : "white"} 
+            <Ionicons
+              name='chevron-forward'
+              size={32}
+              color={
+                initialMediaIndex === mediaItems.length - 1 ? '#555' : 'white'
+              }
             />
           </TouchableOpacity>
         </View>
@@ -485,15 +519,14 @@ export default function HikeHistoryScreen({ navigation }) {
     try {
       // Use the new deleteHike function
       await deleteHike(selectedHikeId);
-      
+
       // Update state
-      setHikeRecords(prevRecords => 
-        prevRecords.filter(hike => hike.id !== selectedHikeId)
+      setHikeRecords(prevRecords =>
+        prevRecords.filter(hike => hike.id !== selectedHikeId),
       );
-      
+
       setDeleteModalVisible(false);
     } catch (error) {
-      console.error('Error deleting hike:', error);
       Alert.alert('Error', 'Failed to delete hike. Please try again.');
     }
   };
@@ -504,43 +537,58 @@ export default function HikeHistoryScreen({ navigation }) {
       Alert.alert('Offline', 'You need to be online to sync your hikes.');
       return;
     }
-    
-    if (!isLoggedIn) {
-      Alert.alert('Not Logged In', 'Please log in to sync your hikes across devices.');
+
+    if (!isAuthenticated) {
+      Alert.alert(
+        'Not Logged In',
+        'Please log in to sync your hikes across devices.',
+      );
       return;
     }
-    
+
     try {
       setIsSyncing(true);
       const result = await syncAllHikesToSupabase();
-      
+
       if (result.success) {
-        Alert.alert('Sync Complete', `Successfully synced ${result.synced} of ${result.total} hikes to the cloud.`);
+        Alert.alert(
+          'Sync Complete',
+          `Successfully synced ${result.synced} of ${result.total} hikes to the cloud.`,
+        );
         // Refresh data
         await fetchHikeRecords();
       } else {
-        Alert.alert('Sync Error', result.error || 'Failed to sync hikes. Please try again.');
+        Alert.alert(
+          'Sync Error',
+          result.error || 'Failed to sync hikes. Please try again.',
+        );
       }
     } catch (error) {
       console.error('Sync error:', error);
-      Alert.alert('Sync Error', 'An unexpected error occurred. Please try again.');
+      Alert.alert(
+        'Sync Error',
+        'An unexpected error occurred. Please try again.',
+      );
     } finally {
       setIsSyncing(false);
     }
   };
-  
+
   // Handle sync individual hike
-  const handleSyncHike = async (hikeId) => {
+  const handleSyncHike = async hikeId => {
     if (!isOnline) {
       Alert.alert('Offline', 'You need to be online to sync your hikes.');
       return;
     }
-    
-    if (!isLoggedIn) {
-      Alert.alert('Not Logged In', 'Please log in to sync your hikes across devices.');
+
+    if (!isAuthenticated) {
+      Alert.alert(
+        'Not Logged In',
+        'Please log in to sync your hikes across devices.',
+      );
       return;
     }
-    
+
     try {
       // Find the hike
       const hikeToSync = hikeRecords.find(h => h.id === hikeId);
@@ -548,13 +596,13 @@ export default function HikeHistoryScreen({ navigation }) {
         Alert.alert('Error', 'Hike not found');
         return;
       }
-      
+
       // Get user ID
       const userId = await getCurrentUserId();
-      
+
       // Sync to Supabase
       await syncHikeToSupabase(hikeToSync, userId);
-      
+
       // Update local state
       const updatedHikes = hikeRecords.map(h => {
         if (h.id === hikeId) {
@@ -562,7 +610,7 @@ export default function HikeHistoryScreen({ navigation }) {
         }
         return h;
       });
-      
+
       setHikeRecords(updatedHikes);
       Alert.alert('Success', 'Hike synced to cloud successfully');
     } catch (error) {
@@ -575,15 +623,20 @@ export default function HikeHistoryScreen({ navigation }) {
     if (loading) {
       return (
         <View style={styles.emptyContainer}>
-          <ActivityIndicator size="large" color="#2E7D32" />
+          <ActivityIndicator size='large' color='#2E7D32' />
           <Text style={styles.emptyText}>Loading your adventures...</Text>
         </View>
       );
     }
-    
+
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="trail-sign-outline" size={80} color="#2E7D32" style={{opacity: 0.7}} />
+        <Ionicons
+          name='trail-sign-outline'
+          size={80}
+          color='#2E7D32'
+          style={{ opacity: 0.7 }}
+        />
         <Text style={styles.emptyTitle}>No Activities Yet</Text>
         <Text style={styles.emptyText}>
           Start tracking to record your outdoor adventures.
@@ -593,7 +646,7 @@ export default function HikeHistoryScreen({ navigation }) {
           onPress={() => navigation.navigate('Tracking')}
         >
           <Text style={styles.startButtonText}>Start Tracking</Text>
-          <Ionicons name="arrow-forward" size={16} color="white" />
+          <Ionicons name='arrow-forward' size={16} color='white' />
         </TouchableOpacity>
       </View>
     );
@@ -601,8 +654,8 @@ export default function HikeHistoryScreen({ navigation }) {
 
   const renderHikeItem = ({ item }) => (
     <View style={styles.hikeItemWrapper}>
-      <HikeHistoryItem 
-        hike={item} 
+      <HikeHistoryItem
+        hike={item}
         onPress={() => navigation.navigate('HikeDetail', { hikeId: item.id })}
         onMediaPress={handleMediaPress}
         onOptionsPress={() => handleOptionsPress(item.id)}
@@ -614,69 +667,73 @@ export default function HikeHistoryScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
-      
+      <StatusBar barStyle='light-content' backgroundColor='#2E7D32' />
+
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="white" />
+          <Ionicons name='arrow-back' size={24} color='white' />
         </TouchableOpacity>
-        
+
         <Text style={styles.headerTitle}>Activity History</Text>
-        
-        {isLoggedIn && (
-          <TouchableOpacity 
+
+        {isAuthenticated && (
+          <TouchableOpacity
             style={styles.syncButton}
             onPress={handleSyncAll}
             disabled={isSyncing || !isOnline}
           >
             {isSyncing ? (
-              <ActivityIndicator size="small" color="white" />
+              <ActivityIndicator size='small' color='white' />
             ) : (
-              <Ionicons name="cloud-upload" size={22} color="white" />
+              <Ionicons name='cloud-upload' size={22} color='white' />
             )}
           </TouchableOpacity>
         )}
-        
+
         <TouchableOpacity style={styles.filterButton}>
-          <Ionicons name="funnel" size={22} color="white" />
+          <Ionicons name='funnel' size={22} color='white' />
         </TouchableOpacity>
       </View>
-      
+
       {/* Offline indicator */}
       {!isOnline && (
         <View style={styles.offlineBar}>
-          <Ionicons name="cloud-offline" size={16} color="white" />
+          <Ionicons name='cloud-offline' size={16} color='white' />
           <Text style={styles.offlineText}>You are offline</Text>
         </View>
       )}
-      
+
       {/* Login reminder */}
-      {!isLoggedIn && hikeRecords.length > 0 && (
-        <TouchableOpacity 
+      {!isAuthenticated && hikeRecords.length > 0 && (
+        <TouchableOpacity
           style={styles.loginReminderBar}
           onPress={() => navigation.navigate('Profile')}
         >
-          <Ionicons name="log-in" size={16} color="white" />
-          <Text style={styles.loginReminderText}>Log in to sync your activities across devices</Text>
-          <Ionicons name="chevron-forward" size={16} color="white" />
+          <Ionicons name='log-in' size={16} color='white' />
+          <Text style={styles.loginReminderText}>
+            Log in to sync your activities across devices
+          </Text>
+          <Ionicons name='chevron-forward' size={16} color='white' />
         </TouchableOpacity>
       )}
-      
+
       <FlatList
         data={hikeRecords}
-        keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
+        keyExtractor={item => item.id?.toString() || Math.random().toString()}
         renderItem={renderHikeItem}
-        contentContainerStyle={hikeRecords.length === 0 ? { flex: 1 } : styles.listContent}
+        contentContainerStyle={
+          hikeRecords.length === 0 ? { flex: 1 } : styles.listContent
+        }
         ListEmptyComponent={renderEmptyState}
         showsVerticalScrollIndicator={false}
       />
 
       {/* Delete Confirmation Modal */}
       <Modal
-        animationType="fade"
+        animationType='fade'
         transparent={true}
         visible={deleteModalVisible}
         onRequestClose={() => setDeleteModalVisible(false)}
@@ -685,18 +742,19 @@ export default function HikeHistoryScreen({ navigation }) {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Delete Activity?</Text>
             <Text style={styles.modalText}>
-              This will permanently delete this activity and all associated data.
+              This will permanently delete this activity and all associated
+              data.
             </Text>
-            
+
             <View style={styles.modalButtons}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={() => setDeleteModalVisible(false)}
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={[styles.modalButton, styles.deleteConfirmButton]}
                 onPress={confirmDeleteHike}
               >
@@ -706,20 +764,20 @@ export default function HikeHistoryScreen({ navigation }) {
           </View>
         </View>
       </Modal>
-      
+
       {/* Media Viewer Modal */}
       <MediaViewerModal />
-      
+
       {/* FAB for new activity */}
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.fab}
         onPress={() => navigation.navigate('Tracking')}
       >
-        <Ionicons name="add" size={24} color="white" />
+        <Ionicons name='add' size={24} color='white' />
       </TouchableOpacity>
     </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {

@@ -6,50 +6,52 @@ import { formatDuration, formatPace } from '../utils/formatters';
 const HikeStats = ({ stats }) => {
   // Convert to kilometers for more readable display
   const distanceInKm = stats.distance / 1000;
-  
+
   return (
     <View style={styles.container}>
       <View style={styles.statGroup}>
         <View style={[styles.statItem, styles.primaryStat]}>
           <View style={styles.statHeader}>
-            <Ionicons name="speedometer-outline" size={20} color="#2E7D32" />
+            <Ionicons name='speedometer-outline' size={20} color='#2E7D32' />
             <Text style={styles.statLabel}>DISTANCE</Text>
           </View>
           <View style={styles.distanceContainer}>
             <Text style={styles.primaryStatValue}>
-              {distanceInKm < 10 ? distanceInKm.toFixed(2) : 
-               distanceInKm < 100 ? distanceInKm.toFixed(1) : 
-               Math.round(distanceInKm)}
+              {distanceInKm < 10
+                ? distanceInKm.toFixed(2)
+                : distanceInKm < 100
+                  ? distanceInKm.toFixed(1)
+                  : Math.round(distanceInKm)}
             </Text>
             <Text style={styles.unitText}>km</Text>
           </View>
         </View>
-        
+
         <View style={styles.divider} />
-        
+
         <View style={styles.statItem}>
           <View style={styles.statHeader}>
-            <Ionicons name="time-outline" size={20} color="#2E7D32" />
+            <Ionicons name='time-outline' size={20} color='#2E7D32' />
             <Text style={styles.statLabel}>DURATION</Text>
           </View>
           <Text style={styles.statValue}>{formatDuration(stats.duration)}</Text>
         </View>
       </View>
-      
+
       <View style={styles.statGroup}>
         <View style={styles.statItem}>
           <View style={styles.statHeader}>
-            <MaterialIcons name="speed" size={20} color="#2E7D32" />
+            <MaterialIcons name='speed' size={20} color='#2E7D32' />
             <Text style={styles.statLabel}>PACE</Text>
           </View>
           <Text style={styles.statValue}>{formatPace(stats.pace)}</Text>
         </View>
-        
+
         <View style={styles.divider} />
-        
+
         <View style={styles.statItem}>
           <View style={styles.statHeader}>
-            <MaterialIcons name="terrain" size={20} color="#2E7D32" />
+            <MaterialIcons name='terrain' size={20} color='#2E7D32' />
             <Text style={styles.statLabel}>ELEVATION</Text>
           </View>
           <Text style={styles.statValue}>{stats.elevation.toFixed(0)}m</Text>

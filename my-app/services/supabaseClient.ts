@@ -4,21 +4,31 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { validateSupabaseConfig } from '../utils/validateSupabaseConfig';
 
+// Fetch API types are available from DOM lib in tsconfig.json
+
+// Supabase client configuration
+
 // Get Supabase credentials from environment variables
-const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl =
+  Constants.expoConfig?.extra?.supabaseUrl ||
+  process.env.EXPO_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey =
+  Constants.expoConfig?.extra?.supabaseAnonKey ||
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 // Check for demo mode
 const isDemoMode = supabaseUrl === 'demo' || supabaseAnonKey === 'demo';
 
 if (isDemoMode) {
   console.log('🎭 DEMO MODE ENABLED - No real database connection');
-  console.log('📝 To use real database, update .env with valid Supabase credentials');
+  console.log(
+    '📝 To use real database, update .env with valid Supabase credentials',
+  );
   console.log('📖 See FIX_REGISTRATION_NOW.md for setup instructions');
 } else {
   console.log('Supabase URL:', supabaseUrl ? 'Configured' : 'Missing');
   console.log('Supabase Anon Key:', supabaseAnonKey ? 'Configured' : 'Missing');
-  
+
   // Validate configuration only in non-demo mode
   const validation = validateSupabaseConfig();
   if (!validation.isValid) {
@@ -29,7 +39,8 @@ if (isDemoMode) {
 
 // Handle missing credentials
 if (!isDemoMode && (!supabaseUrl || !supabaseAnonKey)) {
-  const errorMsg = 'Missing Supabase environment variables. Please check your .env file or use demo mode.';
+  const errorMsg =
+    'Missing Supabase environment variables. Please check your .env file or use demo mode.';
   console.error(errorMsg);
   throw new Error(errorMsg);
 }
@@ -39,7 +50,8 @@ if (!isDemoMode) {
   try {
     new URL(supabaseUrl);
   } catch (error) {
-    const errorMsg = 'Invalid Supabase URL format. Please check your .env file.';
+    const errorMsg =
+      'Invalid Supabase URL format. Please check your .env file.';
     console.error(errorMsg, supabaseUrl);
     throw new Error(errorMsg);
   }
@@ -55,11 +67,32 @@ export const supabase: SupabaseClient = createClient(clientUrl, clientKey, {
     autoRefreshToken: !isDemoMode,
     persistSession: !isDemoMode,
     detectSessionInUrl: false,
+    // Add timeout and retry configuration
+    flowType: 'pkce',
   },
   global: {
     headers: {
       'X-Client-Info': 'hiking-app-react-native',
       'X-Demo-Mode': isDemoMode ? 'true' : 'false',
+    },
+    // Add timeout for all requests
+    fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+      return Promise.race([
+        fetch(input, init),
+        new Promise<Response>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timeout')), 10000),
+        ),
+      ]);
+    },
+  },
+  // Add database connection options
+  db: {
+    schema: 'public',
+  },
+  // Add realtime options
+  realtime: {
+    params: {
+      eventsPerSecond: 2,
     },
   },
 });
@@ -70,7 +103,9 @@ export const isInDemoMode = isDemoMode;
 // Helper function to check if user is logged in
 export const isUserLoggedIn = async (): Promise<boolean> => {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     return !!user;
   } catch (error) {
     console.error('Error checking login status:', error);

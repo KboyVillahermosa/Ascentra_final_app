@@ -1,53 +1,62 @@
-import React from 'react'
-import { StyleSheet, View, Text, TouchableOpacity } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
-import { formatDate, formatDistance, formatDuration, formatPace } from '../utils/formatters'
+import React from 'react';
+import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  formatDate,
+  formatDistance,
+  formatDuration,
+  formatPace,
+} from '../utils/formatters';
 
 export default function HikeHistoryItem({ hike, onPress }) {
   if (!hike) {
-    return null
+    return null;
   }
 
-  const { date, stats } = hike
+  const { date, stats } = hike;
 
   return (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.container}
-      onPress={onPress} 
+      onPress={onPress}
       activeOpacity={0.7}
     >
       <View style={styles.iconContainer}>
-        <Ionicons name="trail-sign" size={24} color="#FC4C02" />
+        <Ionicons name='trail-sign' size={24} color='#FC4C02' />
       </View>
-      
+
       <View style={styles.contentContainer}>
         <View style={styles.headerRow}>
           <Text style={styles.dateText}>{formatDate(date)}</Text>
         </View>
-        
+
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Ionicons name="speedometer-outline" size={16} color="#666" />
-            <Text style={styles.statText}>{formatDistance(stats.distance)}</Text>
+            <Ionicons name='speedometer-outline' size={16} color='#666' />
+            <Text style={styles.statText}>
+              {formatDistance(stats.distance)}
+            </Text>
           </View>
-          
+
           <View style={styles.statItem}>
-            <Ionicons name="time-outline" size={16} color="#666" />
-            <Text style={styles.statText}>{formatDuration(stats.duration)}</Text>
+            <Ionicons name='time-outline' size={16} color='#666' />
+            <Text style={styles.statText}>
+              {formatDuration(stats.duration)}
+            </Text>
           </View>
-          
+
           <View style={styles.statItem}>
-            <Ionicons name="footsteps-outline" size={16} color="#666" />
+            <Ionicons name='footsteps-outline' size={16} color='#666' />
             <Text style={styles.statText}>{formatPace(stats.pace)}</Text>
           </View>
         </View>
       </View>
-      
+
       <View style={styles.arrowContainer}>
-        <Ionicons name="chevron-forward" size={24} color="#CCC" />
+        <Ionicons name='chevron-forward' size={24} color='#CCC' />
       </View>
     </TouchableOpacity>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
@@ -104,4 +113,4 @@ const styles = StyleSheet.create({
   arrowContainer: {
     marginLeft: 4,
   },
-})
+});

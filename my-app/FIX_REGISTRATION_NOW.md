@@ -1,7 +1,9 @@
 # 🚨 IMMEDIATE FIX FOR REGISTRATION ERROR
 
 ## Problem Identified ✅
+
 Your `.env` file contains an **invalid Supabase URL** that doesn't exist:
+
 ```
 EXPO_PUBLIC_SUPABASE_URL=https://igzlopjmcbovgpmngcml.supabase.com
 ```
@@ -23,6 +25,7 @@ EXPO_PUBLIC_SUPABASE_URL=https://igzlopjmcbovgpmngcml.supabase.com
    - Copy `anon public` key
 
 6. **Update Your .env File**:
+
    ```
    # Replace with YOUR new project credentials
    EXPO_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
@@ -45,6 +48,7 @@ EXPO_PUBLIC_SUPABASE_URL=https://igzlopjmcbovgpmngcml.supabase.com
 If you want to test the app immediately without setting up Supabase:
 
 1. **Update .env file**:
+
    ```
    # Demo mode - no real database
    EXPO_PUBLIC_SUPABASE_URL=demo
@@ -71,6 +75,7 @@ If you want to test the app immediately without setting up Supabase:
    - File is in `/my-app/.env` (not `.env.example`)
 
 2. **Restart everything**:
+
    ```bash
    # Stop server (Ctrl+C)
    npm start
@@ -81,5 +86,8 @@ If you want to test the app immediately without setting up Supabase:
 ---
 
 **Need help?** The detailed guides are in:
+
 - `QUICK_SETUP.md` - Step by step with screenshots
+- `SUPABASE_SETUP_GUIDE.md` - Complete setup guide
+
 - `SUPABASE_SETUP_GUIDE.md` - Complete setup guide

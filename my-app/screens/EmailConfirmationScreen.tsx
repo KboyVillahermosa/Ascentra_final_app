@@ -8,7 +8,7 @@ import {
   Alert,
   SafeAreaView,
   StatusBar,
-  Image
+  Image,
 } from 'react-native';
 import { supabase } from '../services/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,41 +16,53 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 
-type EmailConfirmationScreenNavigationProp = StackNavigationProp<RootStackParamList, 'EmailConfirmation'>;
-type EmailConfirmationScreenRouteProp = RouteProp<RootStackParamList, 'EmailConfirmation'>;
+type EmailConfirmationScreenNavigationProp = StackNavigationProp<
+  RootStackParamList,
+  'EmailConfirmation'
+>;
+type EmailConfirmationScreenRouteProp = RouteProp<
+  RootStackParamList,
+  'EmailConfirmation'
+>;
 
 interface EmailConfirmationScreenProps {
   navigation: EmailConfirmationScreenNavigationProp;
   route: EmailConfirmationScreenRouteProp;
 }
 
-export default function EmailConfirmationScreen({ navigation, route }: EmailConfirmationScreenProps) {
+export default function EmailConfirmationScreen({
+  navigation,
+  route,
+}: EmailConfirmationScreenProps) {
   const { email } = route.params || {};
   const [loading, setLoading] = useState<boolean>(false);
   const [resendCooldown, setResendCooldown] = useState<boolean>(false);
   const [cooldownTime, setCooldownTime] = useState<number>(0);
-  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Function to resend verification email
   async function resendVerificationEmail(): Promise<void> {
     if (resendCooldown) {
       Alert.alert(
         'Please Wait',
-        `You can request another verification email in ${cooldownTime} seconds.`
+        `You can request another verification email in ${cooldownTime} seconds.`,
       );
       return;
     }
 
     if (!email) {
-      Alert.alert('Error', 'No email address provided. Please go back and try again.');
+      Alert.alert(
+        'Error',
+        'No email address provided. Please go back and try again.',
+      );
       return;
     }
 
     setLoading(true);
-    
+
     const { error } = await supabase.auth.resend({
       type: 'signup',
-      email: email
+      email: email,
     });
 
     if (error) {
@@ -58,15 +70,15 @@ export default function EmailConfirmationScreen({ navigation, route }: EmailConf
     } else {
       Alert.alert(
         'Verification Email Sent',
-        'A new verification email has been sent to your email address. Please check your inbox and spam folder.'
+        'A new verification email has been sent to your email address. Please check your inbox and spam folder.',
       );
-      
+
       // Set cooldown for resending
       setResendCooldown(true);
       setCooldownTime(60); // 60 seconds cooldown
-      
+
       cooldownTimerRef.current = setInterval(() => {
-        setCooldownTime((prevTime) => {
+        setCooldownTime(prevTime => {
           if (prevTime <= 1) {
             if (cooldownTimerRef.current) {
               clearInterval(cooldownTimerRef.current);
@@ -78,7 +90,7 @@ export default function EmailConfirmationScreen({ navigation, route }: EmailConf
         });
       }, 1000);
     }
-    
+
     setLoading(false);
   }
 
@@ -93,13 +105,13 @@ export default function EmailConfirmationScreen({ navigation, route }: EmailConf
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      
+      <StatusBar barStyle='dark-content' backgroundColor='#FFFFFF' />
+
       {/* Decorative circles */}
       <View style={styles.circle1} />
       <View style={styles.circle2} />
       <View style={styles.circle3} />
-      
+
       <SafeAreaView style={styles.content}>
         <View style={styles.iconContainer}>
           {/* Try to load the image, fallback to text emoji if it fails */}
@@ -107,49 +119,59 @@ export default function EmailConfirmationScreen({ navigation, route }: EmailConf
             <Text style={styles.emailIconText}>✉️</Text>
           </View>
         </View>
-        
+
         <Text style={styles.title}>Verify Your Email</Text>
-        
+
         <Text style={styles.description}>
           We've sent a verification email to:
         </Text>
         <Text style={styles.emailText}>{email || 'your email address'}</Text>
-        
+
         <Text style={styles.instructions}>
-          Please check your inbox and click the verification link to complete your registration.
+          Please check your inbox and click the verification link to complete
+          your registration.
         </Text>
-        
+
         <View style={styles.buttonContainer}>
           <TouchableOpacity
-            style={[styles.resendButton, resendCooldown && styles.disabledButton]}
+            style={[
+              styles.resendButton,
+              resendCooldown && styles.disabledButton,
+            ]}
             onPress={resendVerificationEmail}
             disabled={loading || resendCooldown}
           >
             {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color='#FFFFFF' />
             ) : resendCooldown ? (
               <Text style={styles.buttonText}>Resend in {cooldownTime}s</Text>
             ) : (
               <Text style={styles.buttonText}>Resend Verification Email</Text>
             )}
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.loginButton}
             onPress={() => navigation.navigate('Login')}
           >
             <Text style={styles.loginButtonText}>Back to Login</Text>
           </TouchableOpacity>
         </View>
-        
+
         <View style={styles.helpContainer}>
           <Text style={styles.helpText}>
             Didn't receive the email? Check your spam folder or try these steps:
           </Text>
-          <Text style={styles.helpPoint}>• Make sure your email address is correct</Text>
+          <Text style={styles.helpPoint}>
+            • Make sure your email address is correct
+          </Text>
           <Text style={styles.helpPoint}>• Check your spam or junk folder</Text>
-          <Text style={styles.helpPoint}>• Wait a few minutes and try again</Text>
-          <Text style={styles.helpPoint}>• Contact support if problems persist</Text>
+          <Text style={styles.helpPoint}>
+            • Wait a few minutes and try again
+          </Text>
+          <Text style={styles.helpPoint}>
+            • Contact support if problems persist
+          </Text>
         </View>
       </SafeAreaView>
     </View>
@@ -295,5 +317,5 @@ const styles = StyleSheet.create({
     color: '#555',
     marginLeft: 5,
     marginBottom: 5,
-  }
+  },
 });

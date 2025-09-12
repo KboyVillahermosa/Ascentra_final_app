@@ -3,11 +3,13 @@
 ## Step 1: Create New Supabase Project
 
 ### 1.1 Go to Supabase Dashboard
+
 1. Visit https://supabase.com
 2. Click "Start your project" or "Sign In"
 3. Sign up/Sign in with GitHub, Google, or email
 
 ### 1.2 Create New Project
+
 1. Click "New Project" button
 2. Select your organization (or create one)
 3. Fill in project details:
@@ -19,6 +21,7 @@
 5. Wait 2-3 minutes for project initialization
 
 ### 1.3 Get Your Project Credentials
+
 1. Go to **Settings** > **API** in the left sidebar
 2. Copy the following values:
    - **Project URL** (starts with `https://`)
@@ -27,6 +30,7 @@
 ## Step 2: Update Environment Configuration
 
 ### 2.1 Update .env File
+
 Replace the content in your `.env` file with:
 
 ```env
@@ -40,15 +44,18 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY_HERE
 ## Step 3: Deploy Database Schema
 
 ### 3.1 Access SQL Editor
+
 1. In your Supabase dashboard, go to **SQL Editor**
 2. Click "New Query"
 
 ### 3.2 Run Database Schema
+
 Copy and paste the entire content from `database_schema.sql` into the SQL editor and click "Run".
 
 Alternatively, you can run the schema in sections:
 
 #### Section 1: Core Tables
+
 ```sql
 -- Enable necessary extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -85,6 +92,7 @@ CREATE TABLE IF NOT EXISTS public.activities (
 ```
 
 #### Section 2: Social Features
+
 ```sql
 -- Create activity_likes table
 CREATE TABLE IF NOT EXISTS public.activity_likes (
@@ -107,6 +115,7 @@ CREATE TABLE IF NOT EXISTS public.activity_comments (
 ```
 
 #### Section 3: Forum and Community
+
 ```sql
 -- Create forum_posts table
 CREATE TABLE IF NOT EXISTS public.forum_posts (
@@ -132,6 +141,7 @@ CREATE TABLE IF NOT EXISTS public.forum_comments (
 ```
 
 #### Section 4: Enable Row Level Security
+
 ```sql
 -- Enable RLS on all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -155,17 +165,20 @@ CREATE POLICY "Users can delete own activities" ON public.activities FOR DELETE 
 ## Step 4: Test the Setup
 
 ### 4.1 Restart Development Server
+
 1. Stop the current server (Ctrl+C in terminal)
 2. Run `npm start` again
 3. The app should now load the new Supabase configuration
 
 ### 4.2 Test Registration
+
 1. Open the app in browser or mobile
 2. Go to Registration screen
 3. Fill in the form and submit
 4. Check for success message or errors in console
 
 ### 4.3 Verify Database
+
 1. Go to Supabase Dashboard > **Table Editor**
 2. You should see all the tables created
 3. After successful registration, check the `auth.users` and `profiles` tables for new entries
@@ -173,11 +186,13 @@ CREATE POLICY "Users can delete own activities" ON public.activities FOR DELETE 
 ## Step 5: Configure Authentication (Optional)
 
 ### 5.1 Email Settings
+
 1. Go to **Authentication** > **Settings**
 2. Configure email templates if needed
 3. Set up custom SMTP (optional)
 
 ### 5.2 URL Configuration
+
 1. Go to **Authentication** > **URL Configuration**
 2. Add your app's URL schemes:
    - Site URL: `http://localhost:8081`
@@ -186,12 +201,14 @@ CREATE POLICY "Users can delete own activities" ON public.activities FOR DELETE 
 ## Troubleshooting
 
 ### Common Issues:
+
 1. **"Invalid API key"**: Double-check you copied the anon key correctly
 2. **"Project not found"**: Verify the project URL is correct
 3. **"Network error"**: Check internet connection and Supabase project status
 4. **"Schema errors"**: Run the SQL commands one section at a time
 
 ### Verification Steps:
+
 1. Check Supabase project is active (not paused)
 2. Verify .env file has no extra spaces or quotes
 3. Restart development server after .env changes
@@ -207,6 +224,7 @@ CREATE POLICY "Users can delete own activities" ON public.activities FOR DELETE 
 ## Next Steps
 
 Once setup is complete:
+
 1. Test all app features (registration, login, posting activities)
 2. Customize the database schema if needed
 3. Set up proper email templates

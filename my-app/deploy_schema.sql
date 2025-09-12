@@ -101,13 +101,24 @@ CREATE TABLE IF NOT EXISTS public.activity_comments (
 CREATE TABLE IF NOT EXISTS public.forum_posts (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-    title TEXT NOT NULL,
+    title TEXT,
     content TEXT NOT NULL,
     category TEXT DEFAULT 'general' CHECK (category IN ('general', 'trails', 'gear', 'safety', 'events', 'photos')),
     tags TEXT[],
+    visibility TEXT DEFAULT 'public' CHECK (visibility IN ('public', 'private')),
     is_pinned BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Forum post media
+CREATE TABLE IF NOT EXISTS public.forum_post_media (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    post_id UUID REFERENCES public.forum_posts(id) ON DELETE CASCADE NOT NULL,
+    media_url TEXT NOT NULL,
+    media_type TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
+    thumbnail_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Forum comments
@@ -173,13 +184,17 @@ CREATE TABLE IF NOT EXISTS public.hiking_spots (
     name TEXT NOT NULL,
     description TEXT,
     location TEXT,
+    region TEXT DEFAULT 'Cebu',
     latitude DECIMAL(10,8) NOT NULL,
     longitude DECIMAL(11,8) NOT NULL,
     difficulty TEXT CHECK (difficulty IN ('easy', 'moderate', 'hard', 'expert')),
     features TEXT[], -- ['waterfall', 'viewpoint', 'wildlife', 'camping']
     photos TEXT[],
+    image_url TEXT,
     rating DECIMAL(3,2) DEFAULT 0.0,
+    average_rating DECIMAL(3,2) DEFAULT 0.0,
     review_count INTEGER DEFAULT 0,
+    rating_count INTEGER DEFAULT 0,
     created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -272,6 +287,7 @@ ALTER TABLE public.hikes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activity_likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activity_comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forum_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.forum_post_media ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forum_comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forum_likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
@@ -288,7 +304,7 @@ ALTER TABLE public.avatars ENABLE ROW LEVEL SECURITY;
 -- Profiles policies
 CREATE POLICY "Users can view all profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
 -- Activities policies
 CREATE POLICY "Users can view all activities" ON public.activities FOR SELECT USING (true);
@@ -323,6 +339,11 @@ CREATE POLICY "Users can view all forum posts" ON public.forum_posts FOR SELECT 
 CREATE POLICY "Users can insert own forum posts" ON public.forum_posts FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own forum posts" ON public.forum_posts FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Users can delete own forum posts" ON public.forum_posts FOR DELETE USING (auth.uid() = user_id);
+
+-- Forum post media policies
+CREATE POLICY "Users can view all forum post media" ON public.forum_post_media FOR SELECT USING (true);
+CREATE POLICY "Users can insert forum post media" ON public.forum_post_media FOR INSERT WITH CHECK (true);
+CREATE POLICY "Users can delete forum post media" ON public.forum_post_media FOR DELETE USING (true);
 
 -- Forum comments policies
 CREATE POLICY "Users can view all forum comments" ON public.forum_comments FOR SELECT USING (true);
@@ -375,7 +396,8 @@ CREATE POLICY "Users can delete own avatar" ON public.avatars FOR DELETE USING (
 -- =============================================
 
 -- Activity feed view
-CREATE OR REPLACE VIEW activity_feed AS
+DROP VIEW IF EXISTS activity_feed;
+CREATE VIEW activity_feed AS
 SELECT 
     a.id,
     a.title,
@@ -383,25 +405,22 @@ SELECT
     a.activity_type,
     a.distance,
     a.duration,
-    a.elevation_gain,
-    a.difficulty_level,
-    a.location_name,
-    a.photos,
     a.created_at,
     p.username,
     p.full_name,
     p.avatar_url,
     COUNT(al.id) as like_count,
     COUNT(ac.id) as comment_count
-FROM activities a
-JOIN profiles p ON a.user_id = p.id
-LEFT JOIN activity_likes al ON a.id = al.activity_id
-LEFT JOIN activity_comments ac ON a.id = ac.activity_id
-GROUP BY a.id, p.username, p.full_name, p.avatar_url
+FROM public.activities a
+JOIN public.profiles p ON a.user_id = p.user_id
+LEFT JOIN public.activity_likes al ON a.id = al.activity_id
+LEFT JOIN public.activity_comments ac ON a.id = ac.activity_id
+GROUP BY a.id, a.title, a.description, a.activity_type, a.distance, a.duration, a.created_at, p.username, p.full_name, p.avatar_url
 ORDER BY a.created_at DESC;
 
 -- Hiking spot details view
-CREATE OR REPLACE VIEW hiking_spot_details AS
+DROP VIEW IF EXISTS hiking_spot_details;
+CREATE VIEW hiking_spot_details AS
 SELECT 
     hs.id,
     hs.name,
@@ -410,17 +429,12 @@ SELECT
     hs.latitude,
     hs.longitude,
     hs.difficulty,
-    hs.features,
-    hs.photos,
     hs.rating,
     hs.review_count,
     hs.created_at,
-    p.username as created_by_username,
-    COUNT(hsc.id) as total_comments
-FROM hiking_spots hs
-LEFT JOIN profiles p ON hs.created_by = p.id
-LEFT JOIN hiking_spot_comments hsc ON hs.id = hsc.spot_id
-GROUP BY hs.id, p.username
+    p.username as created_by_username
+FROM public.hiking_spots hs
+LEFT JOIN public.profiles p ON hs.created_by = p.id
 ORDER BY hs.created_at DESC;
 
 -- =============================================

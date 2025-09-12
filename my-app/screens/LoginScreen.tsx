@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  TextInput, 
-  Text, 
-  TouchableOpacity, 
-  Alert, 
-  Image, 
+import type { JSX } from 'react';
+import {
+  StyleSheet,
+  View,
+  TextInput,
+  Text,
+  TouchableOpacity,
+  Alert,
+  Image,
   SafeAreaView,
   StatusBar,
   KeyboardAvoidingView,
@@ -14,24 +15,30 @@ import {
   ActivityIndicator,
   ImageBackground,
   Dimensions,
-  ScrollView
+  ScrollView,
 } from 'react-native';
+// Removed broken design system import
 import { supabase, isInDemoMode } from '../services/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient';
-import { signInWithGoogle } from '../utils/auth';
+import { handlePostAuthProfile } from '../utils/auth';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../App';
 
 const { width, height } = Dimensions.get('window');
 
-type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
+type LoginScreenNavigationProp = NativeStackNavigationProp<
+  RootStackParamList,
+  'Login'
+>;
 
 interface LoginScreenProps {
   navigation: LoginScreenNavigationProp;
 }
 
-export default function LoginScreen({ navigation }: LoginScreenProps): JSX.Element {
+export default function LoginScreen({
+  navigation,
+}: LoginScreenProps): JSX.Element {
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -41,66 +48,77 @@ export default function LoginScreen({ navigation }: LoginScreenProps): JSX.Eleme
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-    
+
     // Handle demo mode
     if (isInDemoMode) {
       Alert.alert(
-        '🎭 Demo Mode', 
-        'Login is disabled in demo mode.\n\nTo enable login:\n1. Create a Supabase project\n2. Update your .env file\n3. Restart the app\n\nSee FIX_REGISTRATION_NOW.md for instructions.'
+        '🎭 Demo Mode',
+        'Login is disabled in demo mode.\n\nTo enable login:\n1. Create a Supabase project\n2. Update your .env file\n3. Restart the app\n\nSee FIX_REGISTRATION_NOW.md for instructions.',
       );
       return;
     }
-    
+
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
     });
 
-    if (error) Alert.alert('Error', error.message);
+    if (error) {
+      // Check if the error is related to email confirmation
+      if (
+        error.message.toLowerCase().includes('email not confirmed') ||
+        error.message.toLowerCase().includes('confirm your email') ||
+        error.message.toLowerCase().includes('email confirmation')
+      ) {
+        Alert.alert(
+          'Email Not Confirmed',
+          'Please check your email and click the confirmation link before signing in.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Resend Email',
+              onPress: () =>
+                navigation.navigate('EmailConfirmation', { email: email }),
+            },
+          ],
+        );
+      } else {
+        Alert.alert('Error', error.message);
+      }
+    } else if (data.user) {
+      // Login successful - ensure user has a profile
+      try {
+        const profileResult = await handlePostAuthProfile(
+          data.user,
+          'email'
+        );
+        
+        if (!profileResult.success) {
+          console.warn('Profile creation failed during login:', profileResult.error);
+          // Continue anyway, profile can be created later
+        }
+      } catch (profileError) {
+        console.warn('Error creating profile during login:', profileError);
+      }
+      
+      // Login successful - the AuthContext will handle the session state
+      // and App.tsx will automatically navigate to the main app
+      console.log('Login successful for user:', data.user.email);
+    }
     setLoading(false);
   }
 
-  const handleGoogleSignIn = async (): Promise<void> => {
-    // Handle demo mode
-    if (isInDemoMode) {
-      Alert.alert(
-        '🎭 Demo Mode', 
-        'Google Sign-in is disabled in demo mode.\n\nTo enable authentication:\n1. Create a Supabase project\n2. Update your .env file\n3. Restart the app\n\nSee FIX_REGISTRATION_NOW.md for instructions.'
-      );
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      const session = await signInWithGoogle();
-      
-      // Log the session for debugging
-      console.log("Session returned:", session ? "Session exists" : "No session");
-      
-      if (session && session.session) {
-        // Navigation will be handled automatically by the auth state change
-        console.log('Google sign-in successful');
-      } else {
-        console.log("No valid session returned");
-        Alert.alert("Login Error", "Could not retrieve session after login");
-      }
-    } catch (error: any) {
-      console.error("Google sign-in error in LoginScreen:", error);
-      Alert.alert("Login Error", error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" />
-      
+      <StatusBar translucent backgroundColor='transparent' />
+
       {/* Header with background image */}
       <View style={styles.headerContainer}>
-        <ImageBackground 
-          source={{ uri: 'https://images.unsplash.com/photo-1551632811-561732d1e306?q=80&w=1000' }}
+        <ImageBackground
+          source={{
+            uri: 'https://images.unsplash.com/photo-1551632811-561732d1e306?q=80&w=1000',
+          }}
           style={styles.headerBackground}
         >
           <LinearGradient
@@ -114,14 +132,14 @@ export default function LoginScreen({ navigation }: LoginScreenProps): JSX.Eleme
           </LinearGradient>
         </ImageBackground>
       </View>
-      
+
       {/* Content section */}
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.content}
-        keyboardVerticalOffset={Platform.OS === "ios" ? -64 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? -64 : 0}
       >
-        <ScrollView 
+        <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollViewContent}
           showsVerticalScrollIndicator={false}
@@ -129,25 +147,27 @@ export default function LoginScreen({ navigation }: LoginScreenProps): JSX.Eleme
           <View style={styles.card}>
             <View style={styles.logoContainer}>
               <View style={styles.logoCircle}>
-                <Image 
-                  source={require('../assets/images/ascentra.png')} 
+                <Image
+                  source={require('../assets/images/ascentra.png')}
                   style={styles.logo}
                 />
               </View>
-              <Text style={styles.subtitle}>Discover trails. Share experiences.</Text>
+              <Text style={styles.subtitle}>
+                Discover trails. Share experiences.
+              </Text>
             </View>
-            
+
             <View style={styles.formContainer}>
               <Text style={styles.formLabel}>EMAIL</Text>
               <View style={styles.inputContainer}>
                 <TextInput
                   style={styles.input}
-                  onChangeText={(text) => setEmail(text)}
+                  onChangeText={text => setEmail(text)}
                   value={email}
-                  placeholder="your@email.com"
-                  placeholderTextColor="#A0A0A0"
-                  autoCapitalize="none"
-                  keyboardType="email-address"
+                  placeholder='your@email.com'
+                  placeholderTextColor='#A0A0A0'
+                  autoCapitalize='none'
+                  keyboardType='email-address'
                 />
               </View>
 
@@ -155,53 +175,55 @@ export default function LoginScreen({ navigation }: LoginScreenProps): JSX.Eleme
               <View style={styles.inputContainer}>
                 <TextInput
                   style={styles.input}
-                  onChangeText={(text) => setPassword(text)}
+                  onChangeText={text => setPassword(text)}
                   value={password}
                   secureTextEntry={true}
-                  placeholder="Your password"
-                  placeholderTextColor="#A0A0A0"
-                  autoCapitalize="none"
+                  placeholder='Your password'
+                  placeholderTextColor='#A0A0A0'
+                  autoCapitalize='none'
                 />
               </View>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.forgotPassword}
-                onPress={() => Alert.alert('Reset Password', 'Password reset functionality will be implemented here')}
+                onPress={() =>
+                  Alert.alert(
+                    'Reset Password',
+                    'Password reset functionality will be implemented here',
+                  )
+                }
+                accessibilityRole='button'
+                accessibilityLabel='Forgot Password'
+                accessibilityHint='Opens password reset dialog'
               >
                 <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.loginButton}
                 onPress={() => signInWithEmail()}
                 disabled={loading}
+                accessibilityRole='button'
+                accessibilityLabel={loading ? 'Logging in' : 'Log in'}
+                accessibilityHint='Logs you into your account'
+                accessibilityState={{ disabled: loading }}
               >
                 {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color='#FFFFFF' />
                 ) : (
                   <Text style={styles.loginButtonText}>LOG IN</Text>
                 )}
               </TouchableOpacity>
             </View>
 
-            <View style={styles.separator}>
-              <View style={styles.line} />
-              <Text style={styles.separatorText}>OR</Text>
-              <View style={styles.line} />
-            </View>
-
-            <TouchableOpacity 
-              style={styles.googleButton}
-              onPress={handleGoogleSignIn}
-              disabled={loading}
-            >
-              <Ionicons name="logo-google" size={24} color="#EA4335" />
-              <Text style={styles.googleButtonText}>Continue with Google</Text>
-            </TouchableOpacity>
-
             <View style={styles.footer}>
               <Text style={styles.footerText}>Don't have an account? </Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('Register')}
+                accessibilityRole='button'
+                accessibilityLabel='Sign Up'
+                accessibilityHint='Navigate to registration screen'
+              >
                 <Text style={styles.registerLink}>Sign Up</Text>
               </TouchableOpacity>
             </View>
@@ -209,13 +231,13 @@ export default function LoginScreen({ navigation }: LoginScreenProps): JSX.Eleme
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#F5F8F5',
   },
   headerContainer: {
     height: height * 0.25, // Reduced header height
@@ -355,38 +377,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     letterSpacing: 0.5,
   },
-  separator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 16, // Reduced margin
-  },
-  line: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E0E0E0',
-  },
-  separatorText: {
-    paddingHorizontal: 10,
-    color: '#757575',
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'white',
-    borderRadius: 12, // Matched to loginButton
-    borderWidth: 1,
-    borderColor: '#DADCE0',
-    padding: 12,
-    marginVertical: 8,
-    height: 50, // Matched to loginButton
-  },
-  googleButtonText: {
-    marginLeft: 12,
-    fontSize: 16,
-    color: '#444',
-    fontWeight: '500',
-  },
+
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -400,6 +391,6 @@ const styles = StyleSheet.create({
   registerLink: {
     fontSize: 15,
     fontWeight: 'bold',
-    color: '#1976D2',
-  }
-})
+    color: '#2E7D32',
+  },
+});

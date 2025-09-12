@@ -10,11 +10,16 @@ import {
   Image,
   Dimensions,
   ActivityIndicator,
-  Platform
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { formatDate, formatDistance, formatDuration, formatPace } from '../utils/formatters';
+import {
+  formatDate,
+  formatDistance,
+  formatDuration,
+  formatPace,
+} from '../utils/formatters';
 import { getHikeById } from '../services/databaseService';
 
 const { width } = Dimensions.get('window');
@@ -24,156 +29,152 @@ export default function HikeDetailScreen({ route, navigation }) {
   const [hike, setHike] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mapType, setMapType] = useState('hybrid'); // Changed from 'standard' to 'hybrid'
-  
+
   // Load hike data
   useEffect(() => {
     async function loadHikeData() {
       try {
         setLoading(true);
         const hikeData = await getHikeById(hikeId);
-        
+
         if (!hikeData) {
           alert('Hike not found');
           navigation.goBack();
           return;
         }
-        
+
         setHike(hikeData);
       } catch (error) {
-        console.error('Error loading hike:', error);
         alert('Failed to load hike details');
         navigation.goBack();
       } finally {
         setLoading(false);
       }
     }
-    
+
     loadHikeData();
   }, [hikeId]);
-  
+
   // Calculate map region based on route coordinates
   const getMapRegion = () => {
-    if (!hike?.routeCoordinates?.length) return {
-      latitude: 0,
-      longitude: 0,
-      latitudeDelta: 0.01,
-      longitudeDelta: 0.01
-    };
-    
+    if (!hike?.routeCoordinates?.length) {
+      return {
+        latitude: 0,
+        longitude: 0,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
+    }
+
     // Find min/max coordinates to set boundaries
     let minLat = hike.routeCoordinates[0].latitude;
     let maxLat = hike.routeCoordinates[0].latitude;
     let minLng = hike.routeCoordinates[0].longitude;
     let maxLng = hike.routeCoordinates[0].longitude;
-    
+
     hike.routeCoordinates.forEach(coord => {
       minLat = Math.min(minLat, coord.latitude);
       maxLat = Math.max(maxLat, coord.latitude);
       minLng = Math.min(minLng, coord.longitude);
       maxLng = Math.max(maxLng, coord.longitude);
     });
-    
+
     // Add padding
     const latPadding = (maxLat - minLat) * 0.2;
     const lngPadding = (maxLng - minLng) * 0.2;
-    
+
     // Log coordinates for debugging
-    console.log('RouteCoordinates count:', hike.routeCoordinates.length);
-    console.log('First coordinate:', hike.routeCoordinates[0]);
-    console.log('Last coordinate:', hike.routeCoordinates[hike.routeCoordinates.length-1]);
 
     // Log the calculated region
     const region = {
       latitude: (minLat + maxLat) / 2,
       longitude: (minLng + maxLng) / 2,
-      latitudeDelta: Math.max((maxLat - minLat) + latPadding, 0.01),
-      longitudeDelta: Math.max((maxLng - minLng) + lngPadding, 0.01)
+      latitudeDelta: Math.max(maxLat - minLat + latPadding, 0.01),
+      longitudeDelta: Math.max(maxLng - minLng + lngPadding, 0.01),
     };
-    console.log('Map region:', region);
 
     return region;
   };
-  
+
   // Toggle map type
   const toggleMapType = () => {
     setMapType(mapType === 'standard' ? 'satellite' : 'standard');
   };
-  
+
   // Get activity icon based on type
   const getActivityIcon = () => {
-    switch(hike?.activityType) {
-      case 'Trail Running': return 'walk';
-      case 'Mountain Biking': return 'bicycle';
-      case 'Backpacking': return 'pin';
-      case 'Rock Climbing': return 'trending-up';
-      case 'Snowshoeing': return 'snow';
-      case 'Exploring': return 'compass';
-      default: return 'footsteps';
+    switch (hike?.activityType) {
+      case 'Trail Running':
+        return 'walk';
+      case 'Mountain Biking':
+        return 'bicycle';
+      case 'Backpacking':
+        return 'pin';
+      case 'Rock Climbing':
+        return 'trending-up';
+      case 'Snowshoeing':
+        return 'snow';
+      case 'Exploring':
+        return 'compass';
+      default:
+        return 'footsteps';
     }
   };
-  
+
   // First, let's add more debugging to validate your coordinates data
   useEffect(() => {
     if (hike?.routeCoordinates?.length) {
-      console.log('ROUTE DATA CHECK:');
-      console.log(`Total points: ${hike.routeCoordinates.length}`);
-      console.log('Sample points:', 
-        hike.routeCoordinates.slice(0, 3).map(coord => 
-          `(${coord.latitude.toFixed(6)}, ${coord.longitude.toFixed(6)})`
-        )
-      );
-      
       // Check if coordinates are valid numbers
       const hasInvalidCoords = hike.routeCoordinates.some(
-        coord => isNaN(coord.latitude) || isNaN(coord.longitude)
+        coord => isNaN(coord.latitude) || isNaN(coord.longitude),
       );
-      
+
       if (hasInvalidCoords) {
-        console.error('INVALID COORDINATES DETECTED');
+        // Invalid coordinates detected
       }
     }
   }, [hike]);
-  
+
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
-        <ActivityIndicator size="large" color="#2E7D32" />
+        <StatusBar barStyle='light-content' backgroundColor='#2E7D32' />
+        <ActivityIndicator size='large' color='#2E7D32' />
         <Text style={styles.loadingText}>Loading activity details...</Text>
       </SafeAreaView>
     );
   }
-  
+
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#2E7D32" />
-      
+      <StatusBar barStyle='light-content' backgroundColor='#2E7D32' />
+
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="white" />
+          <Ionicons name='arrow-back' size={24} color='white' />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{hike.title}</Text>
         <TouchableOpacity style={styles.shareButton}>
-          <Ionicons name="share-outline" size={24} color="white" />
+          <Ionicons name='share-outline' size={24} color='white' />
         </TouchableOpacity>
       </View>
-      
+
       <ScrollView style={styles.content}>
         {/* Activity type badge */}
         <View style={styles.activityBadgeContainer}>
           <View style={styles.activityBadge}>
-            <Ionicons name={getActivityIcon()} size={16} color="white" />
+            <Ionicons name={getActivityIcon()} size={16} color='white' />
             <Text style={styles.activityBadgeText}>
               {hike.activityType || 'Hiking'}
             </Text>
           </View>
           <Text style={styles.dateText}>{formatDate(hike.date)}</Text>
         </View>
-        
+
         {/* Map with route */}
         <View style={styles.mapContainer}>
           <MapView
@@ -184,109 +185,116 @@ export default function HikeDetailScreen({ route, navigation }) {
             showsUserLocation={false}
             minZoomLevel={10} // Force a reasonable zoom level
             onMapReady={() => {
-              console.log('Map is ready');
+              // Map is ready
             }}
           >
             {/* Add a simple marker at the map center for reference */}
             <Marker
               coordinate={getMapRegion()}
-              pinColor="blue"
-              title="Map Center"
+              pinColor='blue'
+              title='Map Center'
             />
-            
+
             {/* Add more visible route lines with higher contrast colors */}
             {hike.routeCoordinates?.length > 1 && (
               <>
                 {/* Background track */}
                 <Polyline
                   coordinates={hike.routeCoordinates}
-                  strokeWidth={12}  // Very thick
-                  strokeColor="rgba(0, 0, 0, 0.5)"  // Black background for contrast
-                  lineCap="round"
-                  lineJoin="round"
+                  strokeWidth={12} // Very thick
+                  strokeColor='rgba(0, 0, 0, 0.5)' // Black background for contrast
+                  lineCap='round'
+                  lineJoin='round'
                   zIndex={1}
                 />
-                
+
                 {/* Main visible track */}
                 <Polyline
                   coordinates={hike.routeCoordinates}
-                  strokeWidth={8}  // Thicker
-                  strokeColor="#4CAF50"  // Brighter green for visibility
-                  lineCap="round"
-                  lineJoin="round"
+                  strokeWidth={8} // Thicker
+                  strokeColor='#4CAF50' // Brighter green for visibility
+                  lineCap='round'
+                  lineJoin='round'
                   zIndex={2}
                 />
               </>
             )}
-            
+
             {/* Add more visible markers for start/end */}
             {hike.routeCoordinates?.length > 0 && (
-              <Marker
-                coordinate={hike.routeCoordinates[0]}
-                title="Start"
-              >
-                <View style={[styles.startMarker, {backgroundColor: 'green'}]}>
-                  <Ionicons name="flag" size={16} color="white" />
+              <Marker coordinate={hike.routeCoordinates[0]} title='Start'>
+                <View
+                  style={[styles.startMarker, { backgroundColor: 'green' }]}
+                >
+                  <Ionicons name='flag' size={16} color='white' />
                 </View>
               </Marker>
             )}
-            
+
             {hike.routeCoordinates?.length > 1 && (
               <Marker
-                coordinate={hike.routeCoordinates[hike.routeCoordinates.length - 1]}
-                title="End"
+                coordinate={
+                  hike.routeCoordinates[hike.routeCoordinates.length - 1]
+                }
+                title='End'
               >
-                <View style={[styles.endMarker, {backgroundColor: 'red'}]}>
-                  <Ionicons name="flag-checkered" size={16} color="white" />
+                <View style={[styles.endMarker, { backgroundColor: 'red' }]}>
+                  <Ionicons name='flag-checkered' size={16} color='white' />
                 </View>
               </Marker>
             )}
           </MapView>
-          
+
           {/* Map type toggle button */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.mapTypeButton}
             onPress={toggleMapType}
           >
-            <Ionicons 
-              name={mapType === 'standard' ? 'earth' : 'map'} 
-              size={20} 
-              color="white" 
+            <Ionicons
+              name={mapType === 'standard' ? 'earth' : 'map'}
+              size={20}
+              color='white'
             />
           </TouchableOpacity>
         </View>
-        
+
         {/* Stats cards */}
         <View style={styles.statsContainer}>
           <View style={styles.statsRow}>
             <View style={styles.statCard}>
-              <Ionicons name="navigate" size={22} color="#2E7D32" />
-              <Text style={styles.statValue}>{formatDistance(hike.distance)}</Text>
+              <Ionicons name='navigate' size={22} color='#2E7D32' />
+              <Text style={styles.statValue}>
+                {formatDistance(hike.distance)}
+              </Text>
               <Text style={styles.statLabel}>Distance</Text>
             </View>
-            
+
             <View style={styles.statCard}>
-              <Ionicons name="time" size={22} color="#2E7D32" />
-              <Text style={styles.statValue}>{formatDuration(hike.duration)}</Text>
+              <Ionicons name='time' size={22} color='#2E7D32' />
+              <Text style={styles.statValue}>
+                {formatDuration(hike.duration)}
+              </Text>
               <Text style={styles.statLabel}>Duration</Text>
             </View>
           </View>
-          
+
           <View style={styles.statsRow}>
             <View style={styles.statCard}>
-              <Ionicons name="speedometer" size={22} color="#2E7D32" />
+              <Ionicons name='speedometer' size={22} color='#2E7D32' />
               <Text style={styles.statValue}>{formatPace(hike.pace)}</Text>
               <Text style={styles.statLabel}>Pace</Text>
             </View>
-            
+
             <View style={styles.statCard}>
-              <Ionicons name="trending-up" size={22} color="#2E7D32" />
-              <Text style={styles.statValue}>{(hike.elevation || 0).toFixed(0)} m</Text>
+              <Ionicons name='trending-up' size={22} color='#2E7D32' />
+              <Text style={styles.statValue}>
+                {(hike.elevation || 0).toFixed(0)} m
+              </Text>
               <Text style={styles.statLabel}>Elevation Gain</Text>
             </View>
           </View>
         </View>
-        
+
         {/* Description section */}
         {hike.description ? (
           <View style={styles.descriptionContainer}>
@@ -294,61 +302,69 @@ export default function HikeDetailScreen({ route, navigation }) {
             <Text style={styles.description}>{hike.description}</Text>
           </View>
         ) : null}
-        
+
         {/* Feelings section */}
         {hike.feeling ? (
           <View style={styles.feelingContainer}>
             <View style={styles.feelingHeader}>
-              <Ionicons 
-                name={hike.feeling === 'Great' ? 'happy' : 
-                     hike.feeling === 'Good' ? 'smile' :
-                     hike.feeling === 'Okay' ? 'thumbs-up' :
-                     hike.feeling === 'Tired' ? 'sad' : 'thumbs-down'} 
-                size={22} 
-                color="#2E7D32" 
+              <Ionicons
+                name={
+                  hike.feeling === 'Great'
+                    ? 'happy'
+                    : hike.feeling === 'Good'
+                      ? 'smile'
+                      : hike.feeling === 'Okay'
+                        ? 'thumbs-up'
+                        : hike.feeling === 'Tired'
+                          ? 'sad'
+                          : 'thumbs-down'
+                }
+                size={22}
+                color='#2E7D32'
               />
               <Text style={styles.feelingTitle}>How it felt</Text>
             </View>
             <Text style={styles.feelingText}>{hike.feeling}</Text>
           </View>
         ) : null}
-        
+
         {/* Private notes section */}
         {hike.privateNotes ? (
           <View style={styles.privateNotesContainer}>
             <View style={styles.privateNotesHeader}>
-              <Ionicons name="lock-closed" size={18} color="#666" />
+              <Ionicons name='lock-closed' size={18} color='#666' />
               <Text style={styles.privateNotesTitle}>Private Notes</Text>
             </View>
             <Text style={styles.privateNotes}>{hike.privateNotes}</Text>
           </View>
         ) : null}
-        
+
         {/* Media gallery */}
         {hike.media && hike.media.length > 0 ? (
           <View style={styles.mediaContainer}>
             <Text style={styles.sectionTitle}>Photos & Videos</Text>
-            <ScrollView 
-              horizontal 
+            <ScrollView
+              horizontal
               showsHorizontalScrollIndicator={false}
               style={styles.mediaScroll}
               contentContainerStyle={styles.mediaScrollContent}
             >
               {hike.media.map((media, index) => {
-                const isVideo = media.type === 'video' || 
-                              (media.uri && media.uri.endsWith('.mp4'));
-                
+                const isVideo =
+                  media.type === 'video' ||
+                  (media.uri && media.uri.endsWith('.mp4'));
+
                 return (
                   <View key={index} style={styles.mediaItem}>
-                    <Image 
-                      source={{ uri: media.uri }} 
-                      style={styles.mediaImage} 
-                      resizeMode="cover"
+                    <Image
+                      source={{ uri: media.uri }}
+                      style={styles.mediaImage}
+                      resizeMode='cover'
                     />
-                    
+
                     {isVideo && (
                       <View style={styles.videoIndicator}>
-                        <Ionicons name="play" size={24} color="white" />
+                        <Ionicons name='play' size={24} color='white' />
                       </View>
                     )}
                   </View>
@@ -357,7 +373,7 @@ export default function HikeDetailScreen({ route, navigation }) {
             </ScrollView>
           </View>
         ) : null}
-        
+
         {/* Bottom padding */}
         <View style={{ height: 40 }} />
       </ScrollView>

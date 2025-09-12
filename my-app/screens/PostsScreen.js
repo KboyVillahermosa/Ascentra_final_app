@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -11,7 +11,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
-  RefreshControl
+  RefreshControl,
 } from 'react-native';
 import { supabase } from '../services/supabaseClient';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,7 +22,7 @@ import { Video } from 'expo-av';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-export default function PostsScreen({ navigation }) {
+const PostsScreen = React.memo(({ navigation }) => {
   const [posts, setPosts] = useState([]);
   const [newPostText, setNewPostText] = useState('');
   const [selectedMedia, setSelectedMedia] = useState([]);
@@ -38,19 +38,23 @@ export default function PostsScreen({ navigation }) {
   useFocusEffect(
     React.useCallback(() => {
       fetchPosts();
-    }, [user])
+    }, [user]),
   );
 
-  async function getUser() {
-    const { data: { user } } = await supabase.auth.getUser();
+  const getUser = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     setUser(user);
-  }
+  }, []);
 
-  async function fetchPosts() {
-    if (!user) return;
-    
+  const fetchPosts = useCallback(async () => {
+    if (!user) {
+      return;
+    }
+
     setRefreshing(true);
-    
+
     try {
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
@@ -58,7 +62,6 @@ export default function PostsScreen({ navigation }) {
         .order('created_at', { ascending: false });
 
       if (postsError) {
-        console.error('Error fetching posts:', postsError);
         Alert.alert('Error', 'Failed to load posts');
         return;
       }
@@ -67,144 +70,179 @@ export default function PostsScreen({ navigation }) {
         .from('likes')
         .select('post_id')
         .eq('user_id', user.id);
-        
+
       if (userLikesError && userLikesError.code !== 'PGRST116') {
-        console.error('Error fetching user likes:', userLikesError);
+        console.warn('Error fetching user likes:', userLikesError);
       }
-      
+
       const likedPostIds = new Set(userLikes?.map(like => like.post_id) || []);
 
-      const enrichedPosts = await Promise.all(postsData.map(async (post) => {
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('username, avatar_url')
-          .eq('id', post.user_id)
-          .single();
-        
-        if (profileError && profileError.code !== 'PGRST116') {
-          console.error('Error fetching profile:', profileError);
-        }
-        
-        const { count: likeCount } = await supabase
-          .from('likes')
-          .select('*', { count: 'exact', head: true })
-          .eq('post_id', post.id);
-        
-        const { count: commentCount } = await supabase
-          .from('comments')
-          .select('*', { count: 'exact', head: true })
-          .eq('post_id', post.id);
-        
+      // Optimize database queries by batching them instead of individual queries per post
+      const userIds = [...new Set(postsData.map(post => post.user_id))];
+      const postIds = postsData.map(post => post.id);
+
+      // Batch fetch all profiles at once
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .in('id', userIds);
+
+      if (profilesError && profilesError.code !== 'PGRST116') {
+        console.warn('Error fetching profiles:', profilesError);
+      }
+
+      // Batch fetch all like counts at once
+      const { data: likesData, error: likesError } = await supabase
+        .from('likes')
+        .select('post_id')
+        .in('post_id', postIds);
+
+      if (likesError && likesError.code !== 'PGRST116') {
+        console.warn('Error fetching likes:', likesError);
+      }
+
+      // Batch fetch all comment counts at once
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('comments')
+        .select('post_id')
+        .in('post_id', postIds);
+
+      if (commentsError && commentsError.code !== 'PGRST116') {
+        console.warn('Error fetching comments:', commentsError);
+      }
+
+      // Create lookup maps for efficient data access
+      const profilesMap = new Map(
+        profilesData?.map(profile => [profile.id, profile]) || [],
+      );
+      const likesCountMap = new Map();
+      const commentsCountMap = new Map();
+
+      // Count likes per post
+      likesData?.forEach(like => {
+        likesCountMap.set(
+          like.post_id,
+          (likesCountMap.get(like.post_id) || 0) + 1,
+        );
+      });
+
+      // Count comments per post
+      commentsData?.forEach(comment => {
+        commentsCountMap.set(
+          comment.post_id,
+          (commentsCountMap.get(comment.post_id) || 0) + 1,
+        );
+      });
+
+      // Map posts with enriched data using lookup maps
+      const enrichedPosts = postsData.map(post => {
+        const profile = profilesMap.get(post.user_id) || {
+          username: 'User',
+          avatar_url: null,
+        };
+        const likeCount = likesCountMap.get(post.id) || 0;
+        const commentCount = commentsCountMap.get(post.id) || 0;
         const isLiked = likedPostIds.has(post.id);
-        
+
         return {
           ...post,
-          profiles: profileData || { username: 'User', avatar_url: null },
-          likeCount: likeCount || 0,
-          commentCount: commentCount || 0,
-          isLiked: isLiked
+          profiles: profile,
+          likeCount,
+          commentCount,
+          isLiked,
         };
-      }));
-      
+      });
+
       setPosts(enrichedPosts);
     } catch (err) {
-      console.error('Unexpected error:', err);
+      console.warn('Error fetching posts:', err);
     } finally {
       setRefreshing(false);
     }
-  }
+  }, [user]);
 
-  async function checkTablesExist() {
+  const checkTablesExist = useCallback(async () => {
     try {
-      console.log('Checking if tables and buckets exist...');
-      
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
         .select('*')
         .limit(1);
-      
-      console.log('Posts table check:', postsError ? 'Error: ' + JSON.stringify(postsError) : 'Exists');
-      
+
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('*')
         .limit(1);
-      
-      console.log('Profiles table check:', profilesError ? 'Error: ' + JSON.stringify(profilesError) : 'Exists');
-      
+
       const { data: likesData, error: likesError } = await supabase
         .from('likes')
         .select('*')
         .limit(1);
-      
-      console.log('Likes table check:', likesError ? 'Error: ' + JSON.stringify(likesError) : 'Exists');
-      
+
       const { data: commentsData, error: commentsError } = await supabase
         .from('comments')
         .select('*')
         .limit(1);
-      
-      console.log('Comments table check:', commentsError ? 'Error: ' + JSON.stringify(commentsError) : 'Exists');
-      
+
       if (user) {
         const { data: userProfile, error: userProfileError } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', user.id)
           .single();
-        
-        console.log('User profile check:', userProfileError ? 'Error: ' + JSON.stringify(userProfileError) : 'Exists');
-        
+
         if (userProfileError && userProfileError.code === 'PGRST116') {
-          console.log('Creating user profile...');
-          
           const { data, error } = await supabase
             .from('profiles')
             .insert([
-              { id: user.id, username: 'User' + user.id.substring(0, 4) }
+              { id: user.id, username: 'User' + user.id.substring(0, 4) },
             ]);
-          
-          console.log('Profile creation:', error ? 'Error: ' + JSON.stringify(error) : 'Success');
         }
       }
-      
-      const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-      
+
+      const { data: buckets, error: bucketsError } =
+        await supabase.storage.listBuckets();
+
       if (bucketsError) {
-        console.error('Error listing buckets:', bucketsError);
         return;
       }
-      
-      const storageBucketExists = buckets && buckets.some(bucket => bucket.name === 'storage');
-      console.log(`Storage bucket exists: ${storageBucketExists ? 'Yes' : 'No'}`);
-      
-    } catch (error) {
-      console.error('Error checking tables and buckets:', error);
-    }
-  }
 
-  async function pickMedia(mediaType = 'all') {
-    const { status: mediaLibraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
+      const storageBucketExists =
+        buckets && buckets.some(bucket => bucket.name === 'storage');
+    } catch (error) {
+      console.warn('Error checking storage bucket:', error);
+    }
+  }, [user]);
+
+  const pickMedia = useCallback(async (mediaType = 'all') => {
+    const { status: mediaLibraryStatus } =
+      await ImagePicker.requestMediaLibraryPermissionsAsync();
+
     if (mediaLibraryStatus !== 'granted') {
-      Alert.alert('Permission Required', 'Please allow access to your media library');
+      Alert.alert(
+        'Permission Required',
+        'Please allow access to your media library',
+      );
       return;
     }
-    
+
     if (mediaType === 'video' || mediaType === 'all') {
-      const { status: cameraRollStatus } = await ImagePicker.requestCameraPermissionsAsync();
+      const { status: cameraRollStatus } =
+        await ImagePicker.requestCameraPermissionsAsync();
       if (cameraRollStatus !== 'granted') {
-        Alert.alert('Permission Required', 'Please allow access to your camera');
+        Alert.alert(
+          'Permission Required',
+          'Please allow access to your camera',
+        );
         return;
       }
     }
 
     const options = {
-      mediaTypes: 
-        mediaType === 'image' 
-          ? ImagePicker.MediaTypeOptions.Images 
-          : mediaType === 'video' 
-            ? ImagePicker.MediaTypeOptions.Videos 
+      mediaTypes:
+        mediaType === 'image'
+          ? ImagePicker.MediaTypeOptions.Images
+          : mediaType === 'video'
+            ? ImagePicker.MediaTypeOptions.Videos
             : ImagePicker.MediaTypeOptions.All,
       allowsEditing: mediaType !== 'all',
       aspect: [4, 3],
@@ -217,208 +255,222 @@ export default function PostsScreen({ navigation }) {
 
     if (!result.canceled && result.assets) {
       setSelectedMedia(prevMedia => {
-        const combinedMedia = [...prevMedia, ...result.assets.map(asset => ({
-          uri: asset.uri,
-          type: asset.type || (asset.uri.endsWith('.mp4') ? 'video' : 'image'),
-          filename: asset.fileName || `file-${Date.now()}`
-        }))];
-        
+        const combinedMedia = [
+          ...prevMedia,
+          ...result.assets.map(asset => ({
+            uri: asset.uri,
+            type:
+              asset.type || (asset.uri.endsWith('.mp4') ? 'video' : 'image'),
+            filename: asset.fileName || `file-${Date.now()}`,
+          })),
+        ];
+
         return combinedMedia.slice(0, 10);
       });
     }
-  }
+  }, []);
 
-  async function uploadMedia(mediaFiles) {
-    try {
-      console.log('Starting media upload process...');
-      
+  const uploadMedia = useCallback(
+    async mediaFiles => {
       const bucketName = 'storage';
-      console.log(`Using bucket: ${bucketName}`);
-      
+
       const uploadPromises = mediaFiles.map(async (media, index) => {
-        console.log(`Processing media file ${index + 1}/${mediaFiles.length}, type: ${media.type}`);
-        
         const base64 = await FileSystem.readAsStringAsync(media.uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        
+
         const isVideo = media.type === 'video';
         const extension = isVideo ? 'mp4' : 'jpg';
         const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
-        
+
         const folderPath = isVideo ? 'videos' : 'images';
         const filePath = `${folderPath}/${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${extension}`;
-        
-        console.log(`Uploading to ${bucketName}/${filePath}`);
-        
+
         const { data, error } = await supabase.storage
           .from(bucketName)
           .upload(filePath, decode(base64), { contentType });
-        
+
         if (error) {
-          console.error(`Upload error for file ${index + 1}:`, error);
           throw error;
         }
-        
+
         const { data: urlData } = supabase.storage
           .from(bucketName)
           .getPublicUrl(filePath);
-        
+
         const publicUrl = urlData?.publicUrl;
-        console.log(`Successfully uploaded file ${index + 1}, URL: ${publicUrl}`);
-        
+
         return {
           url: publicUrl,
-          type: media.type
+          type: media.type,
         };
       });
-      
-      const results = await Promise.all(uploadPromises);
-      console.log(`Successfully uploaded ${results.length} files`);
-      return results;
-    } catch (error) {
-      console.error('Error in uploadMedia function:', error);
-      throw error;
-    }
-  }
 
-  async function createPost() {
+      const results = await Promise.all(uploadPromises);
+
+      return results;
+    },
+    [user],
+  );
+
+  const createPost = useCallback(async () => {
     if (!newPostText.trim() && selectedMedia.length === 0) {
-      Alert.alert('Empty Post', 'Please add some text or media to create a post');
+      Alert.alert(
+        'Empty Post',
+        'Please add some text or media to create a post',
+      );
       return;
     }
-    
+
     if (!user) {
       Alert.alert('Authentication Required', 'Please log in to create a post');
       return;
     }
-    
+
     setIsPosting(true);
-    
+
     try {
       let mediaUrls = [];
-      
+
       if (selectedMedia.length > 0) {
         try {
-          console.log(`Uploading ${selectedMedia.length} media files...`);
           mediaUrls = await uploadMedia(selectedMedia);
-          console.log(`Successfully uploaded ${mediaUrls.length} files`);
         } catch (uploadError) {
-          console.error('Media upload failed:', uploadError);
           Alert.alert(
-            'Upload Error', 
-            'Failed to upload media. Please try again later or check your internet connection.'
+            'Upload Error',
+            'Failed to upload media. Please try again later or check your internet connection.',
           );
           setIsPosting(false);
           return;
         }
       }
-      
+
       const { data, error } = await supabase
         .from('posts')
-        .insert([{
-          user_id: user.id,
-          content: newPostText.trim(),
-          media: mediaUrls.length > 0 ? mediaUrls : null
-        }])
+        .insert([
+          {
+            user_id: user.id,
+            content: newPostText.trim(),
+            media: mediaUrls.length > 0 ? mediaUrls : null,
+          },
+        ])
         .select();
-      
+
       if (error) {
-        console.error('Database insert error:', error);
         throw error;
       }
-      
+
       Alert.alert('Success', 'Your post has been created!');
       setNewPostText('');
       setSelectedMedia([]);
       fetchPosts();
-      
     } catch (error) {
-      console.error('Error creating post:', error);
       Alert.alert('Error', 'Failed to create post. Please try again later.');
     } finally {
       setIsPosting(false);
     }
-  }
+  }, [newPostText, selectedMedia, user, uploadMedia, fetchPosts]);
 
-  async function toggleLike(postId, isLiked) {
-    if (!user) {
-      Alert.alert('Authentication Required', 'Please log in to like posts');
-      return;
-    }
-    
-    try {
-      const currentPost = posts.find(post => post.id === postId);
-      if (!currentPost) return;
-      
-      if (currentPost.likeInProgress) return;
-      
-      setPosts(posts.map(post => {
-        if (post.id === postId) {
-          return { ...post, likeInProgress: true };
+  const toggleLike = useCallback(
+    async (postId, isLiked) => {
+      if (!user) {
+        Alert.alert('Authentication Required', 'Please log in to like posts');
+        return;
+      }
+
+      try {
+        const currentPost = posts.find(post => post.id === postId);
+        if (!currentPost) {
+          return;
         }
-        return post;
-      }));
-      
-      if (isLiked) {
-        const { error } = await supabase
-          .from('likes')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('post_id', postId);
-          
-        if (error) throw error;
-      } else {
-        const { data: existingLike } = await supabase
-          .from('likes')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('post_id', postId)
-          .single();
-          
-        if (!existingLike) {
+
+        if (currentPost.likeInProgress) {
+          return;
+        }
+
+        setPosts(
+          posts.map(post => {
+            if (post.id === postId) {
+              return { ...post, likeInProgress: true };
+            }
+            return post;
+          }),
+        );
+
+        if (isLiked) {
           const { error } = await supabase
             .from('likes')
-            .insert([{
-              user_id: user.id,
-              post_id: postId
-            }]);
-            
-          if (error) throw error;
+            .delete()
+            .eq('user_id', user.id)
+            .eq('post_id', postId);
+
+          if (error) {
+            throw error;
+          }
+        } else {
+          const { data: existingLike } = await supabase
+            .from('likes')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('post_id', postId)
+            .single();
+
+          if (!existingLike) {
+            const { error } = await supabase.from('likes').insert([
+              {
+                user_id: user.id,
+                post_id: postId,
+              },
+            ]);
+
+            if (error) {
+              throw error;
+            }
+          }
         }
+
+        setPosts(
+          posts.map(post => {
+            if (post.id === postId) {
+              return {
+                ...post,
+                likeCount: isLiked
+                  ? Math.max(0, post.likeCount - 1)
+                  : post.likeCount + 1,
+                isLiked: !isLiked,
+                likeInProgress: false,
+              };
+            }
+            return post;
+          }),
+        );
+      } catch (error) {
+        setPosts(
+          posts.map(post => {
+            if (post.id === postId) {
+              return { ...post, likeInProgress: false };
+            }
+            return post;
+          }),
+        );
       }
-      
-      setPosts(posts.map(post => {
-        if (post.id === postId) {
-          return {
-            ...post,
-            likeCount: isLiked ? Math.max(0, post.likeCount - 1) : post.likeCount + 1,
-            isLiked: !isLiked,
-            likeInProgress: false
-          };
-        }
-        return post;
-      }));
-      
-    } catch (error) {
-      console.error('Error toggling like:', error);
-      
-      setPosts(posts.map(post => {
-        if (post.id === postId) {
-          return { ...post, likeInProgress: false };
-        }
-        return post;
-      }));
-    }
-  }
+    },
+    [user, posts],
+  );
 
-  function navigateToComments(postId) {
-    navigation.navigate('Comments', { postId });
-  }
+  const navigateToComments = useCallback(
+    postId => {
+      navigation.navigate('Comments', { postId });
+    },
+    [navigation],
+  );
 
-  function navigateToProfile(userId) {
-    navigation.navigate('Profile', { userId });
-  }
+  const navigateToProfile = useCallback(
+    userId => {
+      navigation.navigate('Profile', { userId });
+    },
+    [navigation],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -429,27 +481,32 @@ export default function PostsScreen({ navigation }) {
         <LinearGradient
           colors={['#2C5F2D', '#3A7F40']}
           style={styles.headerGradient}
-          start={{x: 0, y: 0}}
-          end={{x: 1, y: 0}}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
         >
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="chevron-back" size={24} color="#fff" />
+            <Ionicons name='chevron-back' size={24} color='#fff' />
           </TouchableOpacity>
-          
+
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle}>Trails & Adventures</Text>
-            <Ionicons name="leaf" size={18} color="rgba(255,255,255,0.7)" style={styles.headerIcon} />
+            <Ionicons
+              name='leaf'
+              size={18}
+              color='rgba(255,255,255,0.7)'
+              style={styles.headerIcon}
+            />
           </View>
-          
+
           <TouchableOpacity style={styles.headerRight}>
-            <Ionicons name="search-outline" size={22} color="#fff" />
+            <Ionicons name='search-outline' size={22} color='#fff' />
           </TouchableOpacity>
         </LinearGradient>
       </View>
-      
+
       <ScrollView
         style={styles.scrollView}
         refreshControl={
@@ -459,17 +516,17 @@ export default function PostsScreen({ navigation }) {
         <View style={styles.createPostContainer}>
           <TextInput
             style={styles.postInput}
-            placeholder="Share your hiking adventure..."
-            placeholderTextColor="#A0A0A0"
+            placeholder='Share your hiking adventure...'
+            placeholderTextColor='#A0A0A0'
             multiline={true}
             value={newPostText}
             onChangeText={setNewPostText}
           />
-          
+
           {selectedMedia.length > 0 && (
             <View style={styles.mediaPreviewContainer}>
-              <ScrollView 
-                horizontal 
+              <ScrollView
+                horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.mediaPreviewScrollContent}
               >
@@ -480,94 +537,122 @@ export default function PostsScreen({ navigation }) {
                         <Video
                           source={{ uri: media.uri }}
                           style={styles.mediaPreview}
-                          resizeMode="cover"
-                          shouldPlay={false}
-                          isLooping={false}
-                          usePoster={true}
+                          resizeMode='cover'
                         />
                         <View style={styles.mediaTypeIndicator}>
-                          <Ionicons name="videocam" size={14} color="#FFFFFF" />
+                          <Ionicons name='videocam' size={14} color='#FFFFFF' />
                         </View>
                       </View>
                     ) : (
-                      <Image source={{ uri: media.uri }} style={styles.mediaPreview} />
+                      <Image
+                        source={{ uri: media.uri }}
+                        style={styles.mediaPreview}
+                      />
                     )}
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.removeMediaButton}
                       onPress={() => {
-                        setSelectedMedia(prevMedia => prevMedia.filter((_, i) => i !== index));
+                        setSelectedMedia(prevMedia =>
+                          prevMedia.filter((_, i) => i !== index),
+                        );
                       }}
                     >
-                      <Ionicons name="close-circle-sharp" size={22} color="#FFF" />
+                      <Ionicons
+                        name='close-circle-sharp'
+                        size={22}
+                        color='#FFF'
+                      />
                     </TouchableOpacity>
                   </View>
                 ))}
               </ScrollView>
             </View>
           )}
-          
+
           <View style={styles.postActionBar}>
             <View style={styles.mediaButtons}>
-              <TouchableOpacity style={styles.addMediaButton} onPress={() => pickMedia('image')}>
-                <Ionicons name="image-outline" size={20} color="#4A6572" />
+              <TouchableOpacity
+                style={styles.addMediaButton}
+                onPress={() => pickMedia('image')}
+              >
+                <Ionicons name='image-outline' size={20} color='#4A6572' />
                 <Text style={styles.addMediaText}>Photo</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.addMediaButton} onPress={() => pickMedia('video')}>
-                <Ionicons name="videocam-outline" size={20} color="#4A6572" />
+
+              <TouchableOpacity
+                style={styles.addMediaButton}
+                onPress={() => pickMedia('video')}
+              >
+                <Ionicons name='videocam-outline' size={20} color='#4A6572' />
                 <Text style={styles.addMediaText}>Video</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.addMediaButton} onPress={() => pickMedia('all')}>
-                <Ionicons name="images-outline" size={20} color="#4A6572" />
+
+              <TouchableOpacity
+                style={styles.addMediaButton}
+                onPress={() => pickMedia('all')}
+              >
+                <Ionicons name='images-outline' size={20} color='#4A6572' />
                 <Text style={styles.addMediaText}>Gallery</Text>
               </TouchableOpacity>
             </View>
-            
-            <TouchableOpacity 
-              style={[styles.postButton, (!newPostText.trim() && selectedMedia.length === 0) && styles.postButtonDisabled]}
+
+            <TouchableOpacity
+              style={[
+                styles.postButton,
+                !newPostText.trim() &&
+                  selectedMedia.length === 0 &&
+                  styles.postButtonDisabled,
+              ]}
               onPress={createPost}
-              disabled={isPosting || (!newPostText.trim() && selectedMedia.length === 0)}
+              disabled={
+                isPosting || (!newPostText.trim() && selectedMedia.length === 0)
+              }
             >
               {isPosting ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size='small' color='#fff' />
               ) : (
                 <Text style={styles.postButtonText}>Post</Text>
               )}
             </TouchableOpacity>
           </View>
         </View>
-        
+
         {posts.map(post => (
           <View key={post.id} style={styles.postCard}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.postHeader}
               onPress={() => navigateToProfile(post.user_id)}
             >
-              <Image 
-                source={{ 
-                  uri: post.profiles?.avatar_url || 'https://www.gravatar.com/avatar/?d=mp' 
-                }} 
-                style={styles.avatar} 
+              <Image
+                source={{
+                  uri:
+                    post.profiles?.avatar_url ||
+                    'https://www.gravatar.com/avatar/?d=mp',
+                }}
+                style={styles.avatar}
               />
               <View>
-                <Text style={styles.username}>{post.profiles?.username || 'User'}</Text>
+                <Text style={styles.username}>
+                  {post.profiles?.username || 'User'}
+                </Text>
                 <Text style={styles.timestamp}>
                   {new Date(post.created_at).toLocaleDateString()}
                 </Text>
               </View>
             </TouchableOpacity>
-            
+
             {post.content && (
               <Text style={styles.postContent}>{post.content}</Text>
             )}
-            
+
             {(post.media || post.media_urls) && (
               <View style={styles.postMediaContainer}>
                 {(() => {
                   const mediaArray = post.media || post.media_urls || [];
-                  if (!mediaArray || mediaArray.length === 0) return null;
-                  
+                  if (!mediaArray || mediaArray.length === 0) {
+                    return null;
+                  }
+
                   if (mediaArray.length === 1) {
                     const media = mediaArray[0];
                     return media.type === 'video' ? (
@@ -576,47 +661,53 @@ export default function PostsScreen({ navigation }) {
                           source={{ uri: media.url }}
                           style={styles.singlePostMedia}
                           useNativeControls
-                          resizeMode="contain"
-                          isLooping
-                          shouldPlay={false}
-                          usePoster={true}
+                          resizeMode='contain'
                         />
                         <View style={styles.singleVideoIndicator}>
-                          <Ionicons name="play-circle" size={40} color="#fff" />
+                          <Ionicons name='play-circle' size={40} color='#fff' />
                         </View>
                       </View>
                     ) : (
-                      <Image 
-                        source={{ uri: media.url }} 
-                        style={styles.singlePostMedia} 
-                        resizeMode="cover"
+                      <Image
+                        source={{ uri: media.url }}
+                        style={styles.singlePostMedia}
+                        resizeMode='cover'
                       />
                     );
                   }
-                  
+
                   if (mediaArray.length === 2) {
                     return (
                       <View style={styles.mediaGrid}>
                         {mediaArray.map((media, index) => (
-                          <TouchableOpacity 
-                            key={index} 
+                          <TouchableOpacity
+                            key={index}
                             style={styles.gridItemHalf}
-                            onPress={() => navigation.navigate('MediaViewer', { media: mediaArray, initialIndex: index })}
+                            onPress={() =>
+                              navigation.navigate('MediaViewer', {
+                                media: mediaArray,
+                                initialIndex: index,
+                              })
+                            }
                           >
                             {media.type === 'video' ? (
                               <View style={styles.videoContainer}>
-                                <Image 
-                                  source={{ uri: media.url }} 
-                                  style={styles.gridMedia} 
+                                <Image
+                                  source={{ uri: media.url }}
+                                  style={styles.gridMedia}
                                 />
                                 <View style={styles.videoIndicator}>
-                                  <Ionicons name="play-circle" size={28} color="#fff" />
+                                  <Ionicons
+                                    name='play-circle'
+                                    size={28}
+                                    color='#fff'
+                                  />
                                 </View>
                               </View>
                             ) : (
-                              <Image 
-                                source={{ uri: media.url }} 
-                                style={styles.gridMedia} 
+                              <Image
+                                source={{ uri: media.url }}
+                                style={styles.gridMedia}
                               />
                             )}
                           </TouchableOpacity>
@@ -624,42 +715,72 @@ export default function PostsScreen({ navigation }) {
                       </View>
                     );
                   }
-                  
+
                   if (mediaArray.length === 3) {
                     return (
                       <View style={styles.mediaGridThree}>
-                        <TouchableOpacity 
+                        <TouchableOpacity
                           style={styles.gridItemLarge}
-                          onPress={() => navigation.navigate('MediaViewer', { media: mediaArray, initialIndex: 0 })}
+                          onPress={() =>
+                            navigation.navigate('MediaViewer', {
+                              media: mediaArray,
+                              initialIndex: 0,
+                            })
+                          }
                         >
                           {mediaArray[0].type === 'video' ? (
                             <View style={styles.videoContainer}>
-                              <Image source={{ uri: mediaArray[0].url }} style={styles.gridMedia} />
+                              <Image
+                                source={{ uri: mediaArray[0].url }}
+                                style={styles.gridMedia}
+                              />
                               <View style={styles.videoIndicator}>
-                                <Ionicons name="play-circle" size={28} color="#fff" />
+                                <Ionicons
+                                  name='play-circle'
+                                  size={28}
+                                  color='#fff'
+                                />
                               </View>
                             </View>
                           ) : (
-                            <Image source={{ uri: mediaArray[0].url }} style={styles.gridMedia} />
+                            <Image
+                              source={{ uri: mediaArray[0].url }}
+                              style={styles.gridMedia}
+                            />
                           )}
                         </TouchableOpacity>
-                        
+
                         <View style={styles.gridItemStackContainer}>
                           {mediaArray.slice(1, 3).map((media, index) => (
-                            <TouchableOpacity 
-                              key={index} 
+                            <TouchableOpacity
+                              key={index}
                               style={styles.gridItemStack}
-                              onPress={() => navigation.navigate('MediaViewer', { media: mediaArray, initialIndex: index + 1 })}
+                              onPress={() =>
+                                navigation.navigate('MediaViewer', {
+                                  media: mediaArray,
+                                  initialIndex: index + 1,
+                                })
+                              }
                             >
                               {media.type === 'video' ? (
                                 <View style={styles.videoContainer}>
-                                  <Image source={{ uri: media.url }} style={styles.gridMedia} />
+                                  <Image
+                                    source={{ uri: media.url }}
+                                    style={styles.gridMedia}
+                                  />
                                   <View style={styles.videoIndicator}>
-                                    <Ionicons name="play-circle" size={22} color="#fff" />
+                                    <Ionicons
+                                      name='play-circle'
+                                      size={22}
+                                      color='#fff'
+                                    />
                                   </View>
                                 </View>
                               ) : (
-                                <Image source={{ uri: media.url }} style={styles.gridMedia} />
+                                <Image
+                                  source={{ uri: media.url }}
+                                  style={styles.gridMedia}
+                                />
                               )}
                             </TouchableOpacity>
                           ))}
@@ -667,29 +788,46 @@ export default function PostsScreen({ navigation }) {
                       </View>
                     );
                   }
-                  
+
                   return (
                     <View style={styles.mediaGridFour}>
                       {mediaArray.slice(0, 4).map((media, index) => (
-                        <TouchableOpacity 
-                          key={index} 
+                        <TouchableOpacity
+                          key={index}
                           style={styles.gridItemQuarter}
-                          onPress={() => navigation.navigate('MediaViewer', { media: mediaArray, initialIndex: index })}
+                          onPress={() =>
+                            navigation.navigate('MediaViewer', {
+                              media: mediaArray,
+                              initialIndex: index,
+                            })
+                          }
                         >
                           {media.type === 'video' ? (
                             <View style={styles.videoContainer}>
-                              <Image source={{ uri: media.url }} style={styles.gridMedia} />
+                              <Image
+                                source={{ uri: media.url }}
+                                style={styles.gridMedia}
+                              />
                               <View style={styles.videoIndicator}>
-                                <Ionicons name="play-circle" size={22} color="#fff" />
+                                <Ionicons
+                                  name='play-circle'
+                                  size={22}
+                                  color='#fff'
+                                />
                               </View>
                             </View>
                           ) : (
-                            <Image source={{ uri: media.url }} style={styles.gridMedia} />
+                            <Image
+                              source={{ uri: media.url }}
+                              style={styles.gridMedia}
+                            />
                           )}
-                          
+
                           {mediaArray.length > 4 && index === 3 && (
                             <View style={styles.moreIndicator}>
-                              <Text style={styles.moreIndicatorText}>+{mediaArray.length - 4}</Text>
+                              <Text style={styles.moreIndicatorText}>
+                                +{mediaArray.length - 4}
+                              </Text>
                             </View>
                           )}
                         </TouchableOpacity>
@@ -699,49 +837,62 @@ export default function PostsScreen({ navigation }) {
                 })()}
               </View>
             )}
-            
+
             <View style={styles.postStats}>
               <Text style={styles.statsText}>
-                {post.likeCount} {post.likeCount === 1 ? 'like' : 'likes'} • {post.commentCount} {post.commentCount === 1 ? 'comment' : 'comments'}
+                {post.likeCount} {post.likeCount === 1 ? 'like' : 'likes'} •{' '}
+                {post.commentCount}{' '}
+                {post.commentCount === 1 ? 'comment' : 'comments'}
               </Text>
             </View>
-            
+
             <View style={styles.postActions}>
-              <TouchableOpacity 
-                style={[styles.actionButton, post.likeInProgress && styles.actionButtonDisabled]} 
+              <TouchableOpacity
+                style={[
+                  styles.actionButton,
+                  post.likeInProgress && styles.actionButtonDisabled,
+                ]}
                 onPress={() => toggleLike(post.id, post.isLiked)}
                 disabled={post.likeInProgress}
               >
-                <Ionicons 
-                  name={post.isLiked ? "heart" : "heart-outline"} 
-                  size={20} 
-                  color={post.isLiked ? "#E57373" : "#757575"} 
+                <Ionicons
+                  name={post.isLiked ? 'heart' : 'heart-outline'}
+                  size={20}
+                  color={post.isLiked ? '#E57373' : '#757575'}
                 />
-                <Text style={[styles.actionText, post.isLiked && styles.likedText]}>Like</Text>
+                <Text
+                  style={[styles.actionText, post.isLiked && styles.likedText]}
+                >
+                  Like
+                </Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => navigateToComments(post.id)}
               >
-                <Ionicons name="chatbubble-outline" size={20} color="#757575" />
+                <Ionicons name='chatbubble-outline' size={20} color='#757575' />
                 <Text style={styles.actionText}>Comment</Text>
               </TouchableOpacity>
             </View>
           </View>
         ))}
-        
+
         {posts.length === 0 && !refreshing && (
           <View style={styles.emptyStateContainer}>
-            <Ionicons name="trail-sign-outline" size={56} color="#CFD8DC" />
+            <Ionicons name='trail-sign-outline' size={56} color='#CFD8DC' />
             <Text style={styles.emptyStateText}>No posts yet</Text>
-            <Text style={styles.emptyStateSubtext}>Be the first to share your hiking adventure!</Text>
+            <Text style={styles.emptyStateSubtext}>
+              Be the first to share your hiking adventure!
+            </Text>
           </View>
         )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
-}
+});
+
+export default PostsScreen;
 
 const styles = StyleSheet.create({
   container: {
@@ -850,7 +1001,7 @@ const styles = StyleSheet.create({
   },
   mediaTypeIndicator: {
     position: 'absolute',
-    bottom: 6, 
+    bottom: 6,
     right: 6,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     borderRadius: 4,
@@ -961,7 +1112,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   postMediaContainer: {
-    width: '100%', 
+    width: '100%',
   },
   singlePostMedia: {
     width: '100%',
