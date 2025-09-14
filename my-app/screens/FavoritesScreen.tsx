@@ -21,8 +21,10 @@ import {
   removeFavorite,
   HikingSpot,
 } from '../services/databaseService';
+import { FavoriteSpot } from '../types';
 // Using standard React Native components instead of missing design system components
 import { getHikingSpotImageSource } from '../utils/imageHelpers';
+import { useProfile } from '../contexts/ProfileContext';
 
 const { width, height } = Dimensions.get('window');
 const CARD_HEIGHT = height * 0.7; // TikTok-like full screen cards
@@ -159,23 +161,24 @@ interface FavoritesScreenProps {
 }
 
 const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
-  const [favorites, setFavorites] = useState<HikingSpot[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    favorites,
+    favoritesLoading: loading,
+    removeFromFavorites,
+    refreshFavorites,
+  } = useProfile();
   const [refreshing, setRefreshing] = useState(false);
 
   const loadFavorites = useCallback(async () => {
     try {
-      const userFavorites = await getUserFavorites();
-      setFavorites(userFavorites);
+      await refreshFavorites();
     } catch (error) {
       Alert.alert(
         'Error',
         'Failed to load your favorite spots. Please try again.',
       );
-    } finally {
-      setLoading(false);
     }
-  }, []);
+  }, [refreshFavorites]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -185,12 +188,14 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
 
   const handleRemoveFavorite = useCallback(async (spotId: string) => {
     try {
-      await removeFavorite(spotId);
-      setFavorites(prev => prev.filter(spot => spot.id !== spotId));
+      const success = await removeFromFavorites(spotId);
+      if (!success) {
+        Alert.alert('Error', 'Failed to remove favorite. Please try again.');
+      }
     } catch (error) {
       Alert.alert('Error', 'Failed to remove favorite. Please try again.');
     }
-  }, []);
+  }, [removeFromFavorites]);
 
   const handleSpotPress = useCallback(
     (spot: HikingSpot) => {
@@ -204,17 +209,17 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
   }, [loadFavorites]);
 
   const renderItem = useCallback(
-    ({ item }: { item: HikingSpot }) => (
+    ({ item }: { item: FavoriteSpot }) => (
       <FavoriteSpotCard
-        spot={item}
-        onPress={() => handleSpotPress(item)}
+        spot={item as HikingSpot}
+        onPress={() => handleSpotPress(item as HikingSpot)}
         onRemoveFavorite={handleRemoveFavorite}
       />
     ),
     [handleSpotPress, handleRemoveFavorite],
   );
 
-  const keyExtractor = useCallback((item: HikingSpot) => item.id, []);
+  const keyExtractor = useCallback((item: FavoriteSpot) => item.id, []);
 
   if (loading) {
     return (

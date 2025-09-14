@@ -28,6 +28,7 @@ import * as FileSystem from 'expo-file-system';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import uuid from 'react-native-uuid';
 import { decode } from 'base-64';
+import { ProductionLogger as pLog } from '../utils/productionLogger';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -80,7 +81,7 @@ export default function ForumPost() {
       } = await supabase.auth.getUser();
       setUser(user);
     } catch (error) {
-      console.error('Error getting user:', error);
+      pLog.error('Error getting user:', error);
     }
   }
 
@@ -124,7 +125,7 @@ export default function ForumPost() {
         );
 
       if (mediaError) {
-        console.error('Error fetching post media:', mediaError);
+        pLog.error('Error fetching post media:', mediaError);
       }
 
       // Group media by post_id
@@ -148,7 +149,7 @@ export default function ForumPost() {
         .in('id', userIds);
 
       if (profilesError) {
-        console.error('Error fetching profiles:', profilesError);
+        pLog.error('Error fetching profiles:', profilesError);
       }
 
       // Create a map of user IDs to profiles for quick lookup
@@ -169,7 +170,7 @@ export default function ForumPost() {
         );
 
       if (likeError) {
-        console.error('Error fetching likes:', likeError);
+        pLog.error('Error fetching likes:', likeError);
       }
 
       // Count likes by post
@@ -196,7 +197,7 @@ export default function ForumPost() {
           );
 
         if (userLikesError) {
-          console.error('Error fetching user likes:', userLikesError);
+          pLog.error('Error fetching user likes:', userLikesError);
         }
 
         const userLikedPostsMap = {};
@@ -219,7 +220,7 @@ export default function ForumPost() {
           );
 
       if (commentCountError) {
-        console.error('Error fetching comment counts:', commentCountError);
+        pLog.error('Error fetching comment counts:', commentCountError);
       }
 
       // Count comments by post
@@ -243,7 +244,7 @@ export default function ForumPost() {
 
       setPosts(postsWithData);
     } catch (error) {
-      console.error('Error fetching forum posts:', error);
+      pLog.error('Error fetching forum posts:', error);
       Alert.alert(
         'Error',
         'Failed to load forum posts. Please try again later.',
@@ -314,7 +315,7 @@ export default function ForumPost() {
         ]);
       }
     } catch (error) {
-      console.error('Error picking image:', error);
+      pLog.error('Error picking image:', error);
       Alert.alert('Error', 'Failed to select image. Please try again.');
     }
   }
@@ -362,7 +363,7 @@ export default function ForumPost() {
         ]);
       }
     } catch (error) {
-      console.error('Error picking video:', error);
+      pLog.error('Error picking video:', error);
       Alert.alert('Error', 'Failed to select video. Please try again.');
     }
   }

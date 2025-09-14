@@ -41,10 +41,11 @@ import {
   MOUNT_BABAG_COORDS,
   isMountBabagLocation,
 } from '../services/weatherService';
-import { toggleFavorite, isFavorited } from '../services/favoritesService';
+import { useProfile } from '../contexts/ProfileContext';
 
 export default function HikingSpotDetailsScreen({ route, navigation }) {
   const { spot: passedSpot, spotId } = route.params || {};
+  const { addToFavorites, removeFromFavorites, isSpotFavorited, favoritesLoading } = useProfile();
   const [spot, setSpot] = useState(null);
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,8 +74,6 @@ export default function HikingSpotDetailsScreen({ route, navigation }) {
   const [selectedTrail, setSelectedTrail] = useState(null);
   const [mapLoading, setMapLoading] = useState(true);
   const [selectedRoute, setSelectedRoute] = useState(null);
-  const [isFavorite, setIsFavorite] = useState(false);
-  const [favoriteLoading, setFavoriteLoading] = useState(false);
 
   // Check if this is Mount Babag (ID 3) or if spot name is Mount Babag
   const isMountBabag = spotId === 3 || (spot && spot.name === 'Mount Babag');
@@ -312,42 +311,27 @@ export default function HikingSpotDetailsScreen({ route, navigation }) {
     };
   }, []);
 
-  // Check favorite status when component mounts
-  useEffect(() => {
-    const checkFavoriteStatus = async () => {
-      if (user && (passedSpot?.id || spotId)) {
-        try {
-          const favoriteStatus = await isFavorited(passedSpot?.id || spotId);
-          setIsFavorite(favoriteStatus);
-        } catch (error) {
-          console.error('Error checking favorite status:', error);
-        }
-      }
-    };
-
-    checkFavoriteStatus();
-  }, [user, passedSpot?.id, spotId]);
-
-  // Handle favorite toggle
+  // Handle favorite toggle using ProfileContext
   const handleFavoritePress = async () => {
-    if (!user || favoriteLoading) {
+    if (!user || favoritesLoading) {
       return;
     }
 
-    const currentSpotId = passedSpot?.id || spotId;
-    if (!currentSpotId) {
+    const currentSpot = spot || passedSpot;
+    if (!currentSpot) {
       return;
     }
 
     try {
-      setFavoriteLoading(true);
-      const newFavoriteStatus = await toggleFavorite(currentSpotId);
-      setIsFavorite(newFavoriteStatus);
+      const isCurrentlyFavorited = isSpotFavorited(currentSpot.id);
+      if (isCurrentlyFavorited) {
+        await removeFromFavorites(currentSpot.id);
+      } else {
+        await addToFavorites(currentSpot);
+      }
     } catch (error) {
       console.error('Error toggling favorite:', error);
       Alert.alert('Error', 'Failed to update favorite status');
-    } finally {
-      setFavoriteLoading(false);
     }
   };
 
@@ -1046,12 +1030,12 @@ export default function HikingSpotDetailsScreen({ route, navigation }) {
           <TouchableOpacity
             style={styles.favoriteButton}
             onPress={handleFavoritePress}
-            disabled={favoriteLoading || !user}
+            disabled={favoritesLoading || !user}
           >
             <Ionicons
-              name={isFavorite ? 'heart' : 'heart-outline'}
+              name={isSpotFavorited(spot?.id || passedSpot?.id || '') ? 'heart' : 'heart-outline'}
               size={24}
-              color={isFavorite ? '#FF6B6B' : 'white'}
+              color={isSpotFavorited(spot?.id || passedSpot?.id || '') ? '#FF6B6B' : 'white'}
             />
           </TouchableOpacity>
         </View>

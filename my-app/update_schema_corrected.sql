@@ -76,14 +76,21 @@ DROP POLICY IF EXISTS "Users can update own hiking spots" ON public.hiking_spots
 DROP POLICY IF EXISTS "Users can delete own hiking spots" ON public.hiking_spots;
 
 -- Favorites policies
+DROP POLICY IF EXISTS "Users can view all favorites" ON public.favorites;
 CREATE POLICY "Users can view all favorites" ON public.favorites FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Users can insert own favorites" ON public.favorites;
 CREATE POLICY "Users can insert own favorites" ON public.favorites FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can delete own favorites" ON public.favorites;
 CREATE POLICY "Users can delete own favorites" ON public.favorites FOR DELETE USING (auth.uid() = user_id);
 
 -- Hiking spots policies
+DROP POLICY IF EXISTS "Users can view all hiking spots" ON public.hiking_spots;
 CREATE POLICY "Users can view all hiking spots" ON public.hiking_spots FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Users can insert hiking spots" ON public.hiking_spots;
 CREATE POLICY "Users can insert hiking spots" ON public.hiking_spots FOR INSERT WITH CHECK (auth.uid() = created_by);
+DROP POLICY IF EXISTS "Users can update own hiking spots" ON public.hiking_spots;
 CREATE POLICY "Users can update own hiking spots" ON public.hiking_spots FOR UPDATE USING (auth.uid() = created_by);
+DROP POLICY IF EXISTS "Users can delete own hiking spots" ON public.hiking_spots;
 CREATE POLICY "Users can delete own hiking spots" ON public.hiking_spots FOR DELETE USING (auth.uid() = created_by);
 
 -- =============================================

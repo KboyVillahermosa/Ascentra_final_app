@@ -34,13 +34,15 @@ import { CommonActions } from '@react-navigation/native';
 import { User } from '@supabase/supabase-js';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../App';
-// Removed modern UI components
 import { getHikingSpotImageSource, isMountBabag } from '../utils/imageHelpers';
 import {
   HikingSpot,
   loadHikingSpots,
   ALLOWED_HIKING_SPOTS,
 } from '../data/mockHikingSpots';
+// Removed favoritesService import - now using ProfileContext
+import { useProfile } from '../contexts/ProfileContext';
+import { ProductionLogger as pLog } from '../utils/productionLogger';
 
 // Skill level mapping
 const SKILL_LEVELS = {
@@ -204,6 +206,8 @@ const ExploreCard = React.memo(
     spot: HikingSpot;
     navigation: HomeScreenNavigationProp;
   }) => {
+    const { addToFavorites, removeFromFavorites, isSpotFavorited, favoritesLoading } = useProfile();
+    
     const imageSource = useMemo(() => {
       // Mt. Babag detection handled by isMountBabag utility
       return getHikingSpotImageSource(spot);
@@ -213,9 +217,28 @@ const ExploreCard = React.memo(
       try {
         navigation.navigate('HikingSpotDetails', { spot: spot });
       } catch (navError) {
-        console.warn('Navigation error:', navError);
+        pLog.warn('Navigation error:', navError);
       }
     }, [navigation, spot]);
+
+    const handleFavoriteToggle = useCallback(async () => {
+      if (favoritesLoading) return;
+      
+      try {
+        const isCurrentlyFavorited = isSpotFavorited(spot.id);
+        if (isCurrentlyFavorited) {
+          await removeFromFavorites(spot.id);
+        } else {
+          await addToFavorites({
+            ...spot,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        }
+      } catch (error) {
+        pLog.error('Error toggling favorite:', error);
+      }
+    }, [spot.id, favoritesLoading, isSpotFavorited, addToFavorites, removeFromFavorites]);
 
     return (
       <View style={styles.exploreCardWrapper}>
@@ -235,8 +258,21 @@ const ExploreCard = React.memo(
               }}
             />
             <View style={styles.exploreCardOverlay}>
-              <View style={styles.exploreCardBadge}>
-                <Text style={styles.exploreCardBadgeText}>Adventure</Text>
+              <View style={styles.exploreCardTopRow}>
+                <View style={styles.exploreCardBadge}>
+                  <Text style={styles.exploreCardBadgeText}>Adventure</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.exploreCardHeartButton}
+                  onPress={handleFavoriteToggle}
+                  disabled={favoritesLoading}
+                >
+                  <Ionicons
+                    name={isSpotFavorited(spot.id) ? 'heart' : 'heart-outline'}
+                    size={20}
+                    color={isSpotFavorited(spot.id) ? '#FF6B6B' : 'white'}
+                  />
+                </TouchableOpacity>
               </View>
               <View style={styles.exploreCardRating}>
                 <FontAwesome name='star' size={12} color='#FFD700' />
@@ -286,6 +322,8 @@ const FeaturedCard = React.memo(
     spot: HikingSpot;
     navigation: HomeScreenNavigationProp;
   }) => {
+    const { addToFavorites, removeFromFavorites, isSpotFavorited, favoritesLoading } = useProfile();
+
     const imageSource = useMemo(() => {
       // Mt. Babag detection handled by isMountBabag utility
       return getHikingSpotImageSource(spot);
@@ -294,6 +332,25 @@ const FeaturedCard = React.memo(
     const handlePress = useCallback(() => {
       navigation.navigate('HikingSpotDetails', { spot: spot });
     }, [navigation, spot]);
+
+    const handleFavoriteToggle = useCallback(async () => {
+      if (favoritesLoading) return;
+      
+      try {
+        const isCurrentlyFavorited = isSpotFavorited(spot.id);
+        if (isCurrentlyFavorited) {
+          await removeFromFavorites(spot.id);
+        } else {
+          await addToFavorites({
+            ...spot,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        }
+      } catch (error) {
+        console.error('Error toggling favorite:', error);
+      }
+    }, [spot.id, favoritesLoading, isSpotFavorited, addToFavorites, removeFromFavorites]);
 
     return (
       <TouchableOpacity
@@ -311,6 +368,19 @@ const FeaturedCard = React.memo(
           }}
         />
         <View style={styles.featuredCardOverlay}>
+          <View style={styles.featuredCardTopRow}>
+            <TouchableOpacity
+              style={styles.featuredCardHeartButton}
+              onPress={handleFavoriteToggle}
+              disabled={favoritesLoading}
+            >
+              <Ionicons
+                name={isSpotFavorited(spot.id) ? 'heart' : 'heart-outline'}
+                size={24}
+                color={isSpotFavorited(spot.id) ? '#FF6B6B' : '#FFFFFF'}
+              />
+            </TouchableOpacity>
+          </View>
           <View style={styles.featuredCardContent}>
             <Text style={styles.featuredCardTitle}>{spot.name}</Text>
             <View style={styles.featuredCardRating}>
@@ -329,10 +399,31 @@ const FeaturedCard = React.memo(
 // TopRatedCard component for the new design
 const TopRatedCard = React.memo(
   ({ spot, navigation }: { spot: HikingSpot; navigation: any }) => {
+    const { addToFavorites, removeFromFavorites, isSpotFavorited, favoritesLoading } = useProfile();
+
     const imageSource = getHikingSpotImageSource(spot);
     const rating = spot.average_rating || 0;
     const fullStars = Math.floor(rating);
     const hasHalfStar = rating % 1 >= 0.5;
+
+    const handleFavoriteToggle = useCallback(async () => {
+      if (favoritesLoading) return;
+      
+      try {
+        const isCurrentlyFavorited = isSpotFavorited(spot.id);
+        if (isCurrentlyFavorited) {
+          await removeFromFavorites(spot.id);
+        } else {
+          await addToFavorites({
+            ...spot,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        }
+      } catch (error) {
+        console.error('Error toggling favorite:', error);
+      }
+    }, [spot.id, favoritesLoading, isSpotFavorited, addToFavorites, removeFromFavorites]);
 
     return (
       <TouchableOpacity
@@ -340,11 +431,26 @@ const TopRatedCard = React.memo(
         onPress={() => navigation.navigate('HikingSpotDetails', { spot })}
         activeOpacity={0.8}
       >
-        <Image
-          source={imageSource}
-          style={styles.topRatedCardImage}
-          resizeMode='cover'
-        />
+        <View style={styles.topRatedCardImageContainer}>
+          <Image
+            source={imageSource}
+            style={styles.topRatedCardImage}
+            resizeMode='cover'
+          />
+          <View style={styles.topRatedCardOverlay}>
+            <TouchableOpacity
+              style={styles.topRatedCardHeartButton}
+              onPress={handleFavoriteToggle}
+              disabled={favoritesLoading}
+            >
+              <Ionicons
+                name={isSpotFavorited(spot.id) ? 'heart' : 'heart-outline'}
+                size={20}
+                color={isSpotFavorited(spot.id) ? '#FF6B6B' : '#FFFFFF'}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
         <View style={styles.topRatedCardContent}>
           <Text style={styles.topRatedCardName} numberOfLines={1}>
             {spot.name}
@@ -396,10 +502,31 @@ const TopRatedCard = React.memo(
 // AllSpotsCard component for the View All screen
 const AllSpotsCard = React.memo(
   ({ spot, navigation }: { spot: HikingSpot; navigation: any }) => {
+    const { addToFavorites, removeFromFavorites, isSpotFavorited, favoritesLoading } = useProfile();
+
     const imageSource = getHikingSpotImageSource(spot);
     const rating = spot.average_rating || 0;
     const fullStars = Math.floor(rating);
     const hasHalfStar = rating % 1 >= 0.5;
+
+    const handleFavoriteToggle = useCallback(async () => {
+      if (favoritesLoading) return;
+      
+      try {
+        const isCurrentlyFavorited = isSpotFavorited(spot.id);
+        if (isCurrentlyFavorited) {
+          await removeFromFavorites(spot.id);
+        } else {
+          await addToFavorites({
+            ...spot,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        }
+      } catch (error) {
+        console.error('Error toggling favorite:', error);
+      }
+    }, [spot.id, favoritesLoading, isSpotFavorited, addToFavorites, removeFromFavorites]);
 
     return (
       <TouchableOpacity
@@ -407,11 +534,26 @@ const AllSpotsCard = React.memo(
         onPress={() => navigation.navigate('HikingSpotDetails', { spot })}
         activeOpacity={0.8}
       >
-        <Image
-          source={imageSource}
-          style={styles.allSpotsCardImage}
-          resizeMode='cover'
-        />
+        <View style={styles.allSpotsCardImageContainer}>
+          <Image
+            source={imageSource}
+            style={styles.allSpotsCardImage}
+            resizeMode='cover'
+          />
+          <View style={styles.allSpotsCardOverlay}>
+            <TouchableOpacity
+              style={styles.allSpotsCardHeartButton}
+              onPress={handleFavoriteToggle}
+              disabled={favoritesLoading}
+            >
+              <Ionicons
+                name={isSpotFavorited(spot.id) ? 'heart' : 'heart-outline'}
+                size={20}
+                color={isSpotFavorited(spot.id) ? '#FF6B6B' : '#FFFFFF'}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
         <View style={styles.allSpotsCardContent}>
           <Text style={styles.allSpotsCardName} numberOfLines={2}>
             {spot.name}
@@ -1047,8 +1189,7 @@ function HomeContent({ navigation, user }: HomeContentProps) {
 }
 
 function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
-  const [avatarUrl, setAvatarUrl] = useState<any>(null);
-  const [bio, setBio] = useState<string>('');
+  const { profile: contextProfile, loading: profileLoading, refreshProfile, fetchProfile } = useProfile();
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [hikeRecords, setHikeRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -1056,6 +1197,11 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
   const [mediaViewerVisible, setMediaViewerVisible] = useState<boolean>(false);
   const [mediaItems, setMediaItems] = useState<any[]>([]);
   const [initialMediaIndex, setInitialMediaIndex] = useState<number>(0);
+  
+  // Use context profile data instead of local state
+  const currentProfile = contextProfile || profile;
+  const avatarUrl = currentProfile?.avatar_url;
+  const bio = currentProfile?.bio || 'No bio yet. Tap edit to add your bio.';
 
   // New state for comments
   const [commentModalVisible, setCommentModalVisible] =
@@ -1090,33 +1236,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
     }
   }, [route?.params?.userId, user?.id]);
 
-  // Function to fetch user profile
-  async function fetchProfile() {
-    try {
-      if (!user) {
-        return;
-      }
-
-      // Fetch user profile with bio, avatar_url, and skill_level
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('username, bio, avatar_url, skill_level')
-        .eq('id', user.id)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching profile:', error);
-        return;
-      }
-
-      if (data) {
-        setBio(data.bio || 'No bio yet. Tap edit to add your bio.');
-        setAvatarUrl(data.avatar_url);
-      }
-    } catch (error) {
-      console.warn('Error fetching profile:', error);
-    }
-  }
+  // Profile data is now handled by ProfileContext
 
   // Function to fetch another user's profile
   async function fetchUserProfile(userId: any) {
@@ -1135,8 +1255,6 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
 
       if (data) {
         setViewingUserProfile(data);
-        setBio(data.bio || 'No bio available.');
-        setAvatarUrl(data.avatar_url);
       }
     } catch (error) {
       console.warn('Error fetching user profile:', error);
@@ -1875,7 +1993,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
   const onRefresh = () => {
     setRefreshing(true);
     if (isOwnProfile) {
-      fetchProfile();
+      refreshProfile(); // Use centralized profile refresh
       fetchHikeRecords();
     } else if (viewingUserId) {
       fetchUserProfile(viewingUserId);
@@ -2016,14 +2134,13 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
             <Image
               source={{ uri: avatarUrl }}
               style={styles.profileAvatar}
-              onError={() => setAvatarUrl(null)}
             />
           ) : (
             <View style={styles.profileAvatar}>
               <Text style={styles.profileAvatarText}>
                 {isOwnProfile
-                  ? profile?.username
-                    ? profile.username.charAt(0).toUpperCase()
+                  ? currentProfile?.username
+                    ? currentProfile.username.charAt(0).toUpperCase()
                     : user?.email.charAt(0).toUpperCase()
                   : viewingUserProfile?.username
                     ? viewingUserProfile.username.charAt(0).toUpperCase()
@@ -2034,12 +2151,12 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
 
           <Text style={styles.profileUsername}>
             {isOwnProfile
-              ? profile?.username || 'Username Not Set'
+              ? currentProfile?.username || 'Username Not Set'
               : viewingUserProfile?.username || 'Username Not Available'}
           </Text>
 
           {/* Skill Level Badge */}
-          {((isOwnProfile && profile?.skill_level) ||
+          {((isOwnProfile && currentProfile?.skill_level) ||
             (!isOwnProfile && viewingUserProfile?.skill_level)) && (
             <View
               style={[
@@ -2048,7 +2165,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
                   backgroundColor:
                     SKILL_LEVELS[
                       (isOwnProfile
-                        ? profile?.skill_level
+                        ? currentProfile?.skill_level
                         : viewingUserProfile?.skill_level) as keyof typeof SKILL_LEVELS
                     ]?.color || '#4CAF50',
                 },
@@ -2058,7 +2175,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
                 {
                   SKILL_LEVELS[
                     (isOwnProfile
-                      ? profile?.skill_level
+                      ? currentProfile?.skill_level
                       : viewingUserProfile?.skill_level) as keyof typeof SKILL_LEVELS
                   ]?.emoji
                 }
@@ -2067,7 +2184,7 @@ function ProfileScreen({ user, profile, signOut, navigation, route }: any) {
                 {
                   SKILL_LEVELS[
                     (isOwnProfile
-                      ? profile?.skill_level
+                      ? currentProfile?.skill_level
                       : viewingUserProfile?.skill_level) as keyof typeof SKILL_LEVELS
                   ]?.name
                 }
@@ -2655,6 +2772,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 4,
   },
+  featuredCardTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
+  },
+  featuredCardHeartButton: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 20,
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   featuredOverlay: {
     position: 'absolute',
     top: 0,
@@ -2928,6 +3057,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     marginLeft: 3,
+  },
+  exploreCardTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  exploreCardHeartButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 20,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   exploreCardContent: {
     padding: 15,
@@ -4227,9 +4368,27 @@ const styles = StyleSheet.create({
     elevation: 5,
     overflow: 'hidden',
   },
+  topRatedCardImageContainer: {
+    position: 'relative',
+    width: '100%',
+    height: 160,
+  },
   topRatedCardImage: {
     width: '100%',
     height: 160,
+  },
+  topRatedCardOverlay: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 1,
+  },
+  topRatedCardHeartButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 20,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   topRatedCardContent: {
     padding: 16,
@@ -4329,9 +4488,27 @@ const styles = StyleSheet.create({
     elevation: 3,
     overflow: 'hidden',
   },
+  allSpotsCardImageContainer: {
+    position: 'relative',
+    width: '100%',
+    height: 180,
+  },
   allSpotsCardImage: {
     width: '100%',
     height: 180,
+  },
+  allSpotsCardOverlay: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 1,
+  },
+  allSpotsCardHeartButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 20,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   allSpotsCardContent: {
     padding: 16,

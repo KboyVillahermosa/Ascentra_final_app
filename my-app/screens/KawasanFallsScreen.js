@@ -40,7 +40,8 @@ import {
   KAWASAN_FALLS_COORDS,
   isKawasanFallsLocation,
 } from '../services/weatherService';
-import { toggleFavorite, isFavorited } from '../services/favoritesService';
+// Using ProfileContext for centralized favorites management
+import { useProfile } from '../contexts/ProfileContext';
 
 // Kawasan Falls specific data
 const KAWASAN_FALLS_DATA = {
@@ -94,8 +95,7 @@ export default function KawasanFallsScreen({ navigation }) {
   const [selectedTrail, setSelectedTrail] = useState(null);
   const [mapLoading, setMapLoading] = useState(true);
   const [selectedRoute, setSelectedRoute] = useState(null);
-  const [isFavorite, setIsFavorite] = useState(false);
-  const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const { addToFavorites, removeFromFavorites, isSpotFavorited, favoritesLoading } = useProfile();
 
   const spot = KAWASAN_FALLS_DATA;
   const spotId = '3';
@@ -165,11 +165,7 @@ export default function KawasanFallsScreen({ navigation }) {
         } = await supabase.auth.getUser();
         setUser(user);
 
-        // Check if favorited
-        if (user) {
-          const favorited = await isFavorited(spotId);
-          setIsFavorite(favorited);
-        }
+        // Favorite status is now managed by ProfileContext
 
         // Load comments
         await fetchComments();
@@ -206,15 +202,18 @@ export default function KawasanFallsScreen({ navigation }) {
       return;
     }
 
+    if (favoritesLoading) return;
+
     try {
-      setFavoriteLoading(true);
-      const newFavoriteStatus = await toggleFavorite(spotId);
-      setIsFavorite(newFavoriteStatus);
+      const isCurrentlyFavorited = isSpotFavorited(spotId);
+      if (isCurrentlyFavorited) {
+        await removeFromFavorites(spotId);
+      } else {
+        await addToFavorites(spot);
+      }
     } catch (error) {
       console.error('Error toggling favorite:', error);
       Alert.alert('Error', 'Failed to update favorite status.');
-    } finally {
-      setFavoriteLoading(false);
     }
   };
 
@@ -346,15 +345,15 @@ export default function KawasanFallsScreen({ navigation }) {
           <TouchableOpacity
             style={styles.favoriteButton}
             onPress={handleFavoriteToggle}
-            disabled={favoriteLoading}
+            disabled={favoritesLoading}
           >
-            {favoriteLoading ? (
+            {favoritesLoading ? (
               <ActivityIndicator size='small' color='white' />
             ) : (
               <Ionicons
-                name={isFavorite ? 'heart' : 'heart-outline'}
+                name={isSpotFavorited(spotId) ? 'heart' : 'heart-outline'}
                 size={24}
-                color={isFavorite ? '#FF6B6B' : 'white'}
+                color={isSpotFavorited(spotId) ? '#FF6B6B' : 'white'}
               />
             )}
           </TouchableOpacity>

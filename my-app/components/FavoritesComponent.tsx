@@ -13,25 +13,25 @@ import {
   Modal,
   Dimensions,
 } from 'react-native';
-import { supabase } from '../services/supabaseClient';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
-import { decode } from 'base64-arraybuffer';
 import * as Location from 'expo-location';
+import { useProfile } from '../contexts/ProfileContext';
 
 const { width } = Dimensions.get('window');
 
 interface FavoriteSpot {
   id: string;
   name: string;
-  location: string;
+  description?: string;
+  location_name?: string;
   latitude?: number;
   longitude?: number;
-  image_url?: string;
-  notes?: string;
-  created_at: string;
-  user_id: string;
+  photos?: string[];
+  difficulty_level?: string;
+  distance?: number;
+  elevation_gain?: number;
+  favorited_at?: string;
+  is_favorited?: boolean;
 }
 
 interface FavoritesComponentProps {
@@ -43,23 +43,14 @@ export default function FavoritesComponent({
   navigation,
   userId,
 }: FavoritesComponentProps) {
-  const [favorites, setFavorites] = useState<FavoriteSpot[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { favorites, favoritesLoading, refreshFavorites, removeFromFavorites } = useProfile();
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newSpot, setNewSpot] = useState({
-    name: '',
-    location: '',
-    notes: '',
-    image_url: '',
-  });
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [isAdding, setIsAdding] = useState(false);
+
   const [currentLocation, setCurrentLocation] =
     useState<Location.LocationObject | null>(null);
 
   useEffect(() => {
-    fetchFavorites();
     getCurrentLocation();
   }, []);
 
@@ -77,152 +68,27 @@ export default function FavoritesComponent({
     }
   }
 
-  async function fetchFavorites() {
+  async function handleRefresh() {
     try {
       setRefreshing(true);
-
-      const { data, error } = await supabase
-        .from('favorite_spots')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching favorites:', error);
-        Alert.alert('Error', 'Failed to load favorite spots');
-        return;
-      }
-
-      setFavorites(data || []);
+      await refreshFavorites();
     } catch (error) {
-      console.error('Error in fetchFavorites:', error);
-      Alert.alert('Error', 'Failed to load favorite spots');
+      console.error('Error refreshing favorites:', error);
+      Alert.alert('Error', 'Failed to refresh favorites');
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   }
 
-  async function pickImage() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(
-        'Permission needed',
-        'Please grant camera roll permissions to upload images.',
-      );
-      return;
-    }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 0.8,
-    });
 
-    if (!result.canceled && result.assets[0]) {
-      setSelectedImage(result.assets[0].uri);
-    }
-  }
-
-  async function uploadImage(uri: string): Promise<string | null> {
-    try {
-      const fileInfo = await FileSystem.getInfoAsync(uri);
-      if (!fileInfo.exists) {
-        throw new Error('File does not exist');
-      }
-
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      const fileName = `favorite_spot_${Date.now()}.jpg`;
-      const filePath = `favorites/${fileName}`;
-
-      const { data, error } = await supabase.storage
-        .from('media')
-        .upload(filePath, decode(base64), {
-          contentType: 'image/jpeg',
-        });
-
-      if (error) {
-        throw error;
-      }
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from('media').getPublicUrl(filePath);
-
-      return publicUrl;
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      return null;
-    }
-  }
-
-  async function addFavoriteSpot() {
-    if (!newSpot.name.trim() || !newSpot.location.trim()) {
-      Alert.alert('Error', 'Please enter both name and location.');
-      return;
-    }
-
-    setIsAdding(true);
-
-    try {
-      let imageUrl = null;
-      if (selectedImage) {
-        imageUrl = await uploadImage(selectedImage);
-        if (!imageUrl) {
-          Alert.alert('Error', 'Failed to upload image. Please try again.');
-          setIsAdding(false);
-          return;
-        }
-      }
-
-      // Try to geocode the location if we have current location
-      let latitude = null;
-      let longitude = null;
-
-      if (currentLocation) {
-        // For now, we'll use the current location as coordinates
-        // In a real app, you'd want to geocode the entered location
-        latitude = currentLocation.coords.latitude;
-        longitude = currentLocation.coords.longitude;
-      }
-
-      const { data, error } = await supabase
-        .from('favorite_spots')
-        .insert({
-          name: newSpot.name.trim(),
-          location: newSpot.location.trim(),
-          notes: newSpot.notes.trim() || null,
-          image_url: imageUrl,
-          latitude,
-          longitude,
-          user_id: userId,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      // Reset form
-      setNewSpot({ name: '', location: '', notes: '', image_url: '' });
-      setSelectedImage(null);
-      setShowAddModal(false);
-
-      // Refresh favorites
-      await fetchFavorites();
-
-      Alert.alert('Success', 'Favorite spot added successfully!');
-    } catch (error) {
-      console.error('Error adding favorite spot:', error);
-      Alert.alert('Error', 'Failed to add favorite spot. Please try again.');
-    } finally {
-      setIsAdding(false);
-    }
+  function handleAddFavorite() {
+    Alert.alert(
+      'Add Favorite',
+      'To add favorites, please browse hiking spots and tap the heart icon on spots you want to save.',
+      [{ text: 'OK' }]
+    );
+    setShowAddModal(false);
   }
 
   async function removeFavoriteSpot(spotId: string) {
@@ -236,16 +102,10 @@ export default function FavoritesComponent({
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase
-                .from('favorite_spots')
-                .delete()
-                .eq('id', spotId);
-
-              if (error) {
-                throw error;
+              const success = await removeFromFavorites(spotId);
+              if (!success) {
+                Alert.alert('Error', 'Failed to remove favorite spot.');
               }
-
-              await fetchFavorites();
             } catch (error) {
               console.error('Error removing favorite:', error);
               Alert.alert('Error', 'Failed to remove favorite spot.');
@@ -265,59 +125,75 @@ export default function FavoritesComponent({
     });
   }
 
-  const renderFavoriteSpot = (spot: FavoriteSpot) => (
-    <View key={spot.id} style={styles.spotCard}>
-      {spot.image_url && (
-        <Image source={{ uri: spot.image_url }} style={styles.spotImage} />
-      )}
+  const renderFavoriteSpot = (spot: FavoriteSpot) => {
+    const imageUrl = spot.photos && spot.photos.length > 0 ? spot.photos[0] : null;
+    
+    return (
+      <View key={spot.id} style={styles.spotCard}>
+        {imageUrl && (
+          <Image source={{ uri: imageUrl }} style={styles.spotImage} />
+        )}
 
-      <View style={styles.spotContent}>
-        <View style={styles.spotHeader}>
-          <Text style={styles.spotName}>{spot.name}</Text>
-          <TouchableOpacity
-            style={styles.removeButton}
-            onPress={() => removeFavoriteSpot(spot.id)}
-          >
-            <Ionicons name='heart' size={20} color='#FF3B30' />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.locationRow}>
-          <Ionicons name='location-outline' size={16} color='#666' />
-          <Text style={styles.spotLocation}>{spot.location}</Text>
-        </View>
-
-        {spot.notes && <Text style={styles.spotNotes}>{spot.notes}</Text>}
-
-        <View style={styles.spotFooter}>
-          <Text style={styles.spotDate}>
-            Added {formatDate(spot.created_at)}
-          </Text>
-
-          {spot.latitude && spot.longitude && (
+        <View style={styles.spotContent}>
+          <View style={styles.spotHeader}>
+            <Text style={styles.spotName}>{spot.name}</Text>
             <TouchableOpacity
-              style={styles.directionsButton}
-              onPress={() => {
-                // Open maps app with directions
-                const url = `https://maps.google.com/?q=${spot.latitude},${spot.longitude}`;
-                // In a real app, you'd use Linking.openURL(url)
-                Alert.alert('Directions', `Would open: ${url}`);
-              }}
+              style={styles.removeButton}
+              onPress={() => removeFavoriteSpot(spot.id)}
             >
-              <Ionicons name='navigate-outline' size={16} color='#2E7D32' />
-              <Text style={styles.directionsText}>Directions</Text>
+              <Ionicons name='heart' size={20} color='#FF3B30' />
             </TouchableOpacity>
+          </View>
+
+          {spot.location_name && (
+            <View style={styles.locationRow}>
+              <Ionicons name='location-outline' size={16} color='#666' />
+              <Text style={styles.spotLocation}>{spot.location_name}</Text>
+            </View>
           )}
+
+          {spot.description && <Text style={styles.spotNotes}>{spot.description}</Text>}
+          
+          {spot.difficulty_level && (
+            <Text style={styles.spotDifficulty}>Difficulty: {spot.difficulty_level}</Text>
+          )}
+          
+          {spot.distance && (
+            <Text style={styles.spotDistance}>Distance: {spot.distance} miles</Text>
+          )}
+
+          <View style={styles.spotFooter}>
+            {spot.favorited_at && (
+              <Text style={styles.spotDate}>
+                Added {formatDate(spot.favorited_at)}
+              </Text>
+            )}
+
+            {spot.latitude && spot.longitude && (
+              <TouchableOpacity
+                style={styles.directionsButton}
+                onPress={() => {
+                  // Open maps app with directions
+                  const url = `https://maps.google.com/?q=${spot.latitude},${spot.longitude}`;
+                  // In a real app, you'd use Linking.openURL(url)
+                  Alert.alert('Directions', `Would open: ${url}`);
+                }}
+              >
+                <Ionicons name='navigate-outline' size={16} color='#2E7D32' />
+                <Text style={styles.directionsText}>Directions</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
-  if (loading) {
+  if (favoritesLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size='large' color='#2E7D32' />
-        <Text style={styles.loadingText}>Loading favorites...</Text>
+        <Text style={styles.loadingText}>Loading your favorite spots...</Text>
       </View>
     );
   }
@@ -327,7 +203,7 @@ export default function FavoritesComponent({
       <ScrollView
         style={styles.scrollView}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={fetchFavorites} />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
       >
         {favorites.length > 0 ? (
@@ -347,7 +223,7 @@ export default function FavoritesComponent({
         style={styles.addButton}
         onPress={() => setShowAddModal(true)}
       >
-        <Ionicons name='add' size={24} color='#FFF' />
+        <Ionicons name='information-circle-outline' size={24} color='#FFF' />
       </TouchableOpacity>
 
       {/* Add Favorite Modal */}
@@ -363,88 +239,23 @@ export default function FavoritesComponent({
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Add Favorite Spot</Text>
-            <TouchableOpacity
-              onPress={addFavoriteSpot}
-              disabled={
-                isAdding || !newSpot.name.trim() || !newSpot.location.trim()
-              }
-            >
-              <Text
-                style={[
-                  styles.saveText,
-                  (!newSpot.name.trim() || !newSpot.location.trim()) &&
-                    styles.saveTextDisabled,
-                ]}
-              >
-                {isAdding ? 'Adding...' : 'Save'}
-              </Text>
+            <TouchableOpacity onPress={handleAddFavorite}>
+              <Text style={styles.saveText}>OK</Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalContent}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Name *</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder='Enter spot name'
-                value={newSpot.name}
-                onChangeText={text => setNewSpot({ ...newSpot, name: text })}
-                maxLength={100}
-              />
+          <View style={styles.modalContent}>
+            <View style={styles.messageContainer}>
+              <Ionicons name='information-circle-outline' size={48} color='#2E7D32' />
+              <Text style={styles.messageTitle}>Add Favorites</Text>
+              <Text style={styles.messageText}>
+                To add hiking spots to your favorites, browse the available trails and tap the heart icon on any spot you'd like to save.
+              </Text>
+              <Text style={styles.messageSubtext}>
+                Your favorited spots will appear here for easy access.
+              </Text>
             </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Location *</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder='Enter location or address'
-                value={newSpot.location}
-                onChangeText={text =>
-                  setNewSpot({ ...newSpot, location: text })
-                }
-                maxLength={200}
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Notes</Text>
-              <TextInput
-                style={[styles.textInput, styles.notesInput]}
-                placeholder='Add notes about this spot...'
-                value={newSpot.notes}
-                onChangeText={text => setNewSpot({ ...newSpot, notes: text })}
-                multiline
-                maxLength={500}
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Photo</Text>
-
-              {selectedImage ? (
-                <View style={styles.imagePreviewContainer}>
-                  <Image
-                    source={{ uri: selectedImage }}
-                    style={styles.imagePreview}
-                  />
-                  <TouchableOpacity
-                    style={styles.removeImageButton}
-                    onPress={() => setSelectedImage(null)}
-                  >
-                    <Ionicons name='close-circle' size={24} color='#FF3B30' />
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  style={styles.addPhotoButton}
-                  onPress={pickImage}
-                >
-                  <Ionicons name='camera-outline' size={24} color='#2E7D32' />
-                  <Text style={styles.addPhotoText}>Add Photo</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </ScrollView>
+          </View>
         </View>
       </Modal>
     </View>
@@ -521,6 +332,18 @@ const styles = StyleSheet.create({
     color: '#333',
     lineHeight: 20,
     marginBottom: 12,
+  },
+  spotDifficulty: {
+    fontSize: 12,
+    color: '#FF6B35',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  spotDistance: {
+    fontSize: 12,
+    color: '#2E7D32',
+    marginTop: 2,
+    fontWeight: '500',
   },
   spotFooter: {
     flexDirection: 'row',
@@ -666,5 +489,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#2E7D32',
     fontWeight: '500',
+  },
+  messageContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    backgroundColor: '#F8F9FA',
+    margin: 20,
+    borderRadius: 12,
+  },
+  messageTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  messageText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 12,
+  },
+  messageSubtext: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

@@ -19,7 +19,8 @@ import {
 import { supabase, isInDemoMode } from '../services/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-
+import { useProfile } from '../contexts/ProfileContext';
+import { useAuth } from '../contexts/AuthContext';
 import { handlePostAuthProfile } from '../utils/auth';
 
 type RootStackParamList = {
@@ -89,6 +90,7 @@ const SKILL_LEVELS: SkillLevel[] = [
 ];
 
 export default function RegisterScreen({ navigation }: RegisterScreenProps) {
+  const { forceRefreshProfile } = useProfile();
   const [username, setUsername] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -248,10 +250,24 @@ export default function RegisterScreen({ navigation }: RegisterScreenProps) {
           'email',
           username,
           skillLevel,
+          forceRefreshProfile,
         );
 
         if (!profileResult.success) {
-          // Continue anyway, profile can be created later
+          console.warn('Profile creation failed during signup:', profileResult.error);
+          Alert.alert(
+            'Profile Creation Warning',
+            'Account created successfully, but profile setup encountered an issue. You can complete your profile later.',
+          );
+        }
+
+        // Ensure profile context is refreshed with new data
+        if (forceRefreshProfile) {
+          try {
+            await forceRefreshProfile();
+          } catch (error) {
+            console.warn('Profile refresh failed after signup:', error);
+          }
         }
 
         if (!authData.user.email_confirmed_at) {
@@ -259,7 +275,8 @@ export default function RegisterScreen({ navigation }: RegisterScreenProps) {
           navigation.navigate('EmailConfirmation', { email: email });
         } else {
           // User is confirmed, go to main app
-          Alert.alert('Success', 'Registration successful!');
+          Alert.alert('Success', 'Registration successful! Welcome to Ascentra!');
+          // Navigate to Home - profile context should now be updated
           navigation.navigate('Home');
         }
       }

@@ -17,7 +17,7 @@ import { supabase } from '../services/supabaseClient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ActivityFeedComponent from '../components/ActivityFeedComponent';
-import FavoritesComponent from '../components/FavoritesComponent';
+// import FavoritesComponent from '../components/FavoritesComponent'; // Replaced with inline implementation
 import AchievementsComponent from '../components/AchievementsComponent';
 import FriendsComponent from '../components/FriendsComponent';
 import { getHikesForUser } from '../services/databaseService';
@@ -104,6 +104,12 @@ export default function ProfileScreen({
     profile: globalProfile,
     loading: profileLoading,
     refreshProfile,
+    favorites,
+    favoritesLoading,
+    addToFavorites,
+    removeFromFavorites,
+    isSpotFavorited,
+    refreshFavorites,
   } = useProfile();
 
   // For viewing other users' profiles, we still need local state
@@ -154,8 +160,9 @@ export default function ProfileScreen({
   useEffect(() => {
     if (currentUser) {
       if (isOwnProfile) {
-        // For own profile, use global context
+        // For own profile, use global context with force refresh for immediate updates
         refreshProfile(); // This will refresh the global state
+        refreshFavorites(); // Refresh favorites from global context
         fetchUserPosts(currentUser.id);
         fetchUserStats(currentUser.id);
         fetchUserHikes(currentUser.id);
@@ -176,6 +183,7 @@ export default function ProfileScreen({
         if (isOwnProfile) {
           // For own profile, refresh global context
           refreshProfile();
+          refreshFavorites();
         } else if (userId) {
           fetchOtherUserProfile(userId);
         }
@@ -186,7 +194,7 @@ export default function ProfileScreen({
         // Clear the refresh parameter
         navigation.setParams({ refresh: undefined });
       }
-    }, [route.params?.refresh, currentUser, userId, isOwnProfile]),
+    }, [route.params?.refresh, currentUser, userId, isOwnProfile, refreshProfile, refreshFavorites]),
   );
 
   // Add function to fetch user hikes
@@ -332,15 +340,22 @@ export default function ProfileScreen({
     setRefreshing(true);
 
     const refreshPromises = [
-      isOwnProfile ? fetchProfile() : fetchOtherUserProfile(profileId || ''),
       fetchUserPosts(profileId || ''),
       fetchUserStats(profileId || ''),
       fetchUserHikes(profileId || ''),
     ];
 
-    // Add progression refresh for own profile
-    if (isOwnProfile && fetchProgressionStats) {
-      refreshPromises.push(fetchProgressionStats());
+    if (isOwnProfile) {
+      // For own profile, refresh the centralized context
+      refreshPromises.push(refreshProfile());
+      refreshPromises.push(refreshFavorites());
+      // Add progression refresh for own profile
+      if (fetchProgressionStats) {
+        refreshPromises.push(fetchProgressionStats());
+      }
+    } else {
+      // For other user profiles, fetch their data
+      refreshPromises.push(fetchOtherUserProfile(profileId || ''));
     }
 
     Promise.all(refreshPromises).finally(() => {
@@ -574,14 +589,14 @@ export default function ProfileScreen({
             {/* Name and Skill Badge */}
             <View style={styles.nameAndBadgeContainer}>
               <Text style={styles.profileName}>
-                {profile?.username || 'User'}
+                {profile?.username || (profileLoading ? 'Loading...' : 'User')}
               </Text>
 
               {/* Skill Level Badge */}
               {profile?.skill_level &&
                 SKILL_LEVELS[
                   profile.skill_level as keyof typeof SKILL_LEVELS
-                ] && (
+                ] ? (
                   <View
                     style={[
                       styles.skillBadge,
@@ -608,6 +623,24 @@ export default function ProfileScreen({
                       }
                     </Text>
                   </View>
+                ) : (
+                  !profileLoading && (
+                    <View
+                      style={[
+                        styles.skillBadge,
+                        {
+                          backgroundColor: SKILL_LEVELS.rookie_rambler.color,
+                        },
+                      ]}
+                    >
+                      <Text style={styles.skillBadgeEmoji}>
+                        {SKILL_LEVELS.rookie_rambler.emoji}
+                      </Text>
+                      <Text style={styles.skillBadgeText}>
+                        {SKILL_LEVELS.rookie_rambler.name}
+                      </Text>
+                    </View>
+                  )
                 )}
             </View>
 
@@ -747,7 +780,7 @@ export default function ProfileScreen({
                 <View style={styles.favoritesButtonText}>
                   <Text style={styles.favoritesButtonTitle}>My Favorites</Text>
                   <Text style={styles.favoritesButtonSubtitle}>
-                    View your favorite hiking spots
+                    {favorites.length} favorite hiking spots
                   </Text>
                 </View>
                 <Ionicons name='chevron-forward' size={20} color='#999' />
@@ -766,10 +799,80 @@ export default function ProfileScreen({
 
         {/* Favorites Tab */}
         {activeTab === 'Favorites' && (
-          <FavoritesComponent
-            navigation={navigation}
-            userId={profile?.id || ''}
-          />
+          <View style={styles.favoritesTabContainer}>
+            {favoritesLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.loadingText}>Loading favorites...</Text>
+              </View>
+            ) : favorites.length > 0 ? (
+              <FlatList
+                data={favorites}
+                keyExtractor={(item) => item.id}
+                numColumns={2}
+                columnWrapperStyle={styles.favoritesRow}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.favoriteCard}
+                    onPress={() => {
+                      navigation.navigate('HikingSpotDetails', {
+                        spot: item,
+                      });
+                    }}
+                  >
+                    <Image
+                      source={{
+                        uri: item.photos?.[0] || 'https://via.placeholder.com/150x100?text=No+Image',
+                      }}
+                      style={styles.favoriteImage}
+                    />
+                    <TouchableOpacity
+                      style={styles.favoriteHeartButton}
+                      onPress={async () => {
+                        const success = await removeFromFavorites(item.id);
+                        if (!success) {
+                          Alert.alert('Error', 'Failed to remove from favorites');
+                        }
+                      }}
+                    >
+                      <Ionicons name="heart" size={20} color="#FF6B6B" />
+                    </TouchableOpacity>
+                    <View style={styles.favoriteCardContent}>
+                      <Text style={styles.favoriteCardTitle} numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                      <Text style={styles.favoriteCardLocation} numberOfLines={1}>
+                        {item.location_name}
+                      </Text>
+                      <View style={styles.favoriteCardStats}>
+                        <Text style={styles.favoriteCardStat}>
+                          {item.difficulty_level}
+                        </Text>
+                        <Text style={styles.favoriteCardStat}>
+                          {item.distance}km
+                        </Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            ) : (
+              <View style={styles.emptyFavoritesContainer}>
+                <Ionicons name="heart-outline" size={64} color="#CCC" />
+                <Text style={styles.emptyFavoritesTitle}>No Favorites Yet</Text>
+                <Text style={styles.emptyFavoritesSubtitle}>
+                  Start exploring and add hiking spots to your favorites!
+                </Text>
+                <TouchableOpacity
+                  style={styles.exploreButton}
+                  onPress={() => navigation.navigate('Home')}
+                >
+                  <Text style={styles.exploreButtonText}>Explore Spots</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         )}
 
         {/* Achievements Tab */}
@@ -1215,5 +1318,108 @@ const styles = StyleSheet.create({
   favoritesButtonSubtitle: {
     fontSize: 14,
     color: '#666',
+  },
+  favoritesTabContainer: {
+    flex: 1,
+    padding: 15,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 50,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
+  favoritesRow: {
+    justifyContent: 'space-between',
+    paddingHorizontal: 5,
+  },
+  favoriteCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    marginBottom: 15,
+    width: '48%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+  },
+  favoriteImage: {
+    width: '100%',
+    height: 120,
+    resizeMode: 'cover',
+  },
+  favoriteHeartButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
+    padding: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  favoriteCardContent: {
+    padding: 12,
+  },
+  favoriteCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  favoriteCardLocation: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  favoriteCardStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  favoriteCardStat: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  emptyFavoritesContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 50,
+  },
+  emptyFavoritesTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 15,
+    marginBottom: 8,
+  },
+  emptyFavoritesSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 25,
+    paddingHorizontal: 20,
+  },
+  exploreButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  exploreButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

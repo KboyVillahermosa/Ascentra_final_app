@@ -9,33 +9,29 @@ import { User } from '@supabase/supabase-js';
 import { supabase } from '../services/supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from './AuthContext';
-
-interface Profile {
-  id: string;
-  user_id: string;
-  username: string;
-  bio?: string;
-  avatar_url?: string;
-  skill_level: string;
-  cover_photo_url?: string;
-  total_km_traveled?: number;
-  created_at?: string;
-  updated_at?: string;
-}
+import { HikingSpot, Profile, FavoriteSpot } from '../types';
 
 interface ProfileContextType {
   profile: Profile | null;
+  favorites: FavoriteSpot[];
   loading: boolean;
+  favoritesLoading: boolean;
   error: string | null;
+  fetchProfile: (userId?: string) => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<boolean>;
   refreshProfile: () => Promise<void>;
-  fetchProfile: () => Promise<void>;
-  clearProfile: () => void;
+  forceRefreshProfile: () => Promise<void>;
+  addToFavorites: (spot: HikingSpot) => Promise<boolean>;
+  removeFromFavorites: (spotId: string) => Promise<boolean>;
+  isSpotFavorited: (spotId: string) => boolean;
+  refreshFavorites: () => Promise<void>;
+  forceRefresh: () => Promise<void>;
 }
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
 
 const PROFILE_STORAGE_KEY = 'user_profile_cache';
+const FAVORITES_STORAGE_KEY = 'user_favorites_cache';
 
 // Skill levels definition
 export const SKILL_LEVELS = {
@@ -49,22 +45,76 @@ export const SKILL_LEVELS = {
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [favorites, setFavorites] = useState<FavoriteSpot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load profile from cache on mount
+  // Load profile and favorites from cache on mount
   useEffect(() => {
     loadProfileFromCache();
+    loadFavoritesFromCache();
   }, []);
 
-  // Fetch profile when user changes
+  // Fetch profile and favorites when user changes
   useEffect(() => {
     if (!authLoading && user) {
-      fetchProfile(user.id);
+      fetchProfile();
+      fetchFavorites();
     } else if (!authLoading && !user) {
       clearProfile();
     }
   }, [user, authLoading]);
+
+  // Set up real-time listener for profile changes
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const profileSubscription = supabase
+      .channel('profile-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`,
+        },
+        async (payload) => {
+          console.log('Profile change detected:', payload);
+          
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            // Update local state with new data
+            const updatedProfile: Profile = {
+              id: payload.new.id,
+              user_id: payload.new.user_id,
+              username: payload.new.username || '',
+              full_name: payload.new.full_name || '',
+              bio: payload.new.bio || '',
+              avatar_url: payload.new.avatar_url,
+              profile_picture: payload.new.profile_picture,
+              skill_level: payload.new.skill_level || 'rookie_rambler',
+              cover_photo_url: payload.new.cover_photo_url,
+              total_km_traveled: payload.new.total_km_traveled || 0,
+              created_at: payload.new.created_at,
+              updated_at: payload.new.updated_at,
+            };
+            
+            setProfile(updatedProfile);
+            await saveProfileToCache(updatedProfile);
+          } else if (payload.eventType === 'INSERT' && payload.new) {
+            // Handle new profile creation
+            await fetchProfile(user.id);
+          }
+        }
+      )
+      .subscribe();
+
+    // Cleanup subscription on unmount
+    return () => {
+      supabase.removeChannel(profileSubscription);
+    };
+  }, [user?.id]);
 
   const loadProfileFromCache = async () => {
     try {
@@ -89,7 +139,36 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const fetchProfile = async (userId: string) => {
+  const loadFavoritesFromCache = async () => {
+    try {
+      const cachedFavorites = await AsyncStorage.getItem(FAVORITES_STORAGE_KEY);
+      if (cachedFavorites) {
+        const parsedFavorites = JSON.parse(cachedFavorites);
+        setFavorites(parsedFavorites);
+      }
+    } catch (error) {
+      console.error('Error loading favorites from cache:', error);
+    }
+  };
+
+  const saveFavoritesToCache = async (favoritesData: FavoriteSpot[]) => {
+    try {
+      await AsyncStorage.setItem(
+        FAVORITES_STORAGE_KEY,
+        JSON.stringify(favoritesData),
+      );
+    } catch (error) {
+      console.error('Error saving favorites to cache:', error);
+    }
+  };
+
+  const fetchProfile = async (userId?: string) => {
+    const targetUserId = userId || user?.id;
+    if (!targetUserId) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -97,7 +176,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       const { data, error: fetchError } = await supabase
         .from('profiles')
         .select('*')
-        .eq('user_id', userId)
+        .eq('id', targetUserId)
         .single();
 
       if (fetchError && fetchError.code !== 'PGRST116') {
@@ -109,8 +188,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
           id: data.id,
           user_id: data.user_id,
           username: data.username || '',
+          full_name: data.full_name || '',
           bio: data.bio || '',
           avatar_url: data.avatar_url,
+          profile_picture: data.profile_picture,
           skill_level: data.skill_level || 'rookie_rambler',
           cover_photo_url: data.cover_photo_url,
           total_km_traveled: data.total_km_traveled || 0,
@@ -123,8 +204,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       } else {
         // Create default profile if none exists
         const defaultProfile: Partial<Profile> = {
-          user_id: userId,
+          id: targetUserId,
           username: '',
+          full_name: '',
           bio: '',
           skill_level: 'rookie_rambler',
         };
@@ -144,8 +226,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
             id: newProfile.id,
             user_id: newProfile.user_id,
             username: newProfile.username || '',
+            full_name: newProfile.full_name || '',
             bio: newProfile.bio || '',
             avatar_url: newProfile.avatar_url,
+            profile_picture: newProfile.profile_picture,
             skill_level: newProfile.skill_level || 'rookie_rambler',
             cover_photo_url: newProfile.cover_photo_url,
             total_km_traveled: newProfile.total_km_traveled || 0,
@@ -193,7 +277,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
             ...updates,
             updated_at: new Date().toISOString(),
           })
-          .eq('user_id', user.id);
+          .eq('id', user.id);
 
         if (updateError) {
           // Revert optimistic update on error
@@ -202,6 +286,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
           throw updateError;
         }
 
+        // Force refresh to ensure data consistency
+        await fetchProfile(user.id);
+        
         return true;
       } catch (error) {
         console.error('Error updating profile:', error);
@@ -220,21 +307,179 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user]);
 
+  // Force immediate profile refresh - useful for signup and critical updates
+   const forceRefreshProfile = useCallback(async (): Promise<void> => {
+     if (!user) return;
+     
+     // Clear cache first to ensure fresh data
+     await AsyncStorage.removeItem(PROFILE_STORAGE_KEY);
+     
+     // Fetch fresh profile data
+     await fetchProfile(user.id);
+   }, [user, fetchProfile]);
+
+  const fetchFavorites = async () => {
+    if (!user?.id) return;
+    
+    try {
+      setFavoritesLoading(true);
+      
+      const { data, error } = await supabase
+        .from('favorites')
+        .select(`
+          *,
+          hiking_spots (
+            id,
+            name,
+            description,
+            difficulty,
+            image_url,
+            latitude,
+            longitude,
+            rating,
+            review_count
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching favorites:', error);
+        return;
+      }
+
+      const favoritesData: FavoriteSpot[] = (data || []).map((fav: any) => ({
+        ...fav.hiking_spots,
+        favorited_at: fav.created_at,
+        is_favorited: true,
+      }));
+
+      setFavorites(favoritesData);
+      await saveFavoritesToCache(favoritesData);
+    } catch (error) {
+      console.error('Error in fetchFavorites:', error);
+    } finally {
+      setFavoritesLoading(false);
+    }
+  };
+
+  const addToFavorites = useCallback(
+    async (spot: HikingSpot): Promise<boolean> => {
+      if (!user) return false;
+
+      try {
+        // Optimistically update local state
+        const newFavorite: FavoriteSpot = {
+          ...spot,
+          favorited_at: new Date().toISOString(),
+          is_favorited: true,
+        };
+        const updatedFavorites = [newFavorite, ...favorites];
+        setFavorites(updatedFavorites);
+        await saveFavoritesToCache(updatedFavorites);
+
+        // Update database
+        const { error } = await supabase.from('favorites').insert({
+          user_id: user.id,
+          spot_id: spot.id,
+        });
+
+        if (error) {
+          // Revert optimistic update on error
+          setFavorites(favorites);
+          await saveFavoritesToCache(favorites);
+          console.error('Error adding to favorites:', error);
+          return false;
+        }
+
+        return true;
+      } catch (error) {
+        console.error('Error in addToFavorites:', error);
+        return false;
+      }
+    },
+    [user, favorites],
+  );
+
+  const removeFromFavorites = useCallback(
+    async (spotId: string): Promise<boolean> => {
+      if (!user) return false;
+
+      try {
+        // Optimistically update local state
+        const updatedFavorites = favorites.filter((fav) => fav.id !== spotId);
+        setFavorites(updatedFavorites);
+        await saveFavoritesToCache(updatedFavorites);
+
+        // Update database
+        const { error } = await supabase
+          .from('favorites')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('spot_id', spotId);
+
+        if (error) {
+          // Revert optimistic update on error
+          setFavorites(favorites);
+          await saveFavoritesToCache(favorites);
+          console.error('Error removing from favorites:', error);
+          return false;
+        }
+
+        return true;
+      } catch (error) {
+        console.error('Error in removeFromFavorites:', error);
+        return false;
+      }
+    },
+    [user, favorites],
+  );
+
+  const isSpotFavorited = useCallback(
+    (spotId: string): boolean => {
+      return favorites.some((fav) => fav.id === spotId);
+    },
+    [favorites],
+  );
+
+  const refreshFavorites = useCallback(async () => {
+    await fetchFavorites();
+  }, [user]);
+
+  const forceRefresh = useCallback(async () => {
+    if (user) {
+      await Promise.all([
+        fetchProfile(),
+        fetchFavorites()
+      ]);
+    }
+  }, [user]);
+
   const clearProfile = useCallback(() => {
     setProfile(null);
+    setFavorites([]);
     setError(null);
     setLoading(false);
+    setFavoritesLoading(false);
     AsyncStorage.removeItem(PROFILE_STORAGE_KEY).catch(console.error);
+    AsyncStorage.removeItem(FAVORITES_STORAGE_KEY).catch(console.error);
   }, []);
 
   const value: ProfileContextType = {
     profile,
     loading,
     error,
+    fetchProfile,
     updateProfile,
     refreshProfile,
-    fetchProfile: () => fetchProfile(user?.id || ''),
-    clearProfile,
+    forceRefreshProfile,
+    favorites,
+    favoritesLoading,
+    addToFavorites,
+    removeFromFavorites,
+    isSpotFavorited,
+    refreshFavorites,
+    forceRefresh,
   };
 
   return (

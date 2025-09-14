@@ -19,23 +19,21 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
-import { useProfile } from '../contexts/ProfileContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useProfile } from '../contexts/ProfileContext';
 
 export default function EditProfileScreen({ navigation }) {
   const { user } = useAuth();
-  const {
-    profile,
-    updateProfile: updateProfileContext,
-    loading: profileLoading,
-    error,
-  } = useProfile();
-  const [loading, setLoading] = useState(false);
+  const { profile, updateProfile, forceRefreshProfile, loading: profileLoading } = useProfile();
   const [username, setUsername] = useState('');
+  const [fullName, setFullName] = useState('');
   const [bio, setBio] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState(null);
   const [skillLevel, setSkillLevel] = useState('rookie_rambler');
+  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [profilePicture, setProfilePicture] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [errors, setErrors] = useState({});
 
   // Skill levels definition for the picker
   const SKILL_LEVELS_ARRAY = [
@@ -71,42 +69,85 @@ export default function EditProfileScreen({ navigation }) {
     },
   ];
 
-  // Load profile data when profile context updates
+  // Load profile data when component mounts
   useEffect(() => {
     if (profile) {
       setUsername(profile.username || '');
+      setFullName(profile.full_name || '');
       setBio(profile.bio || '');
-      setAvatarUrl(profile.avatar_url);
       setSkillLevel(profile.skill_level || 'rookie_rambler');
+      setAvatarUrl(profile.avatar_url || null);
+      setProfilePicture(profile.profile_picture || null);
+      setErrors({}); // Clear any previous errors
     }
   }, [profile]);
 
+  // Form validation function
+  const validateForm = () => {
+    const newErrors = {};
+    
+    if (!username.trim()) {
+      newErrors.username = 'Username is required';
+    } else if (username.trim().length < 3) {
+      newErrors.username = 'Username must be at least 3 characters';
+    } else if (username.trim().length > 20) {
+      newErrors.username = 'Username must be less than 20 characters';
+    } else if (!/^[a-zA-Z0-9_]+$/.test(username.trim())) {
+      newErrors.username = 'Username can only contain letters, numbers, and underscores';
+    }
+    
+    if (fullName.trim().length > 50) {
+      newErrors.fullName = 'Full name must be less than 50 characters';
+    }
+    
+    if (bio.length > 500) {
+      newErrors.bio = 'Bio must be less than 500 characters';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   async function handleUpdateProfile() {
     try {
+      // Validate form before submitting
+      if (!validateForm()) {
+        return;
+      }
+
       setLoading(true);
+      setErrors({});
 
       if (!user) {
         throw new Error('No user found');
       }
 
-      // Update the profile using global context
-      const success = await updateProfileContext({
+      // Use centralized profile update function
+      const success = await updateProfile({
         username: username.trim(),
+        full_name: fullName.trim(),
         bio: bio.trim(),
-        avatar_url: avatarUrl,
         skill_level: skillLevel,
+        avatar_url: avatarUrl,
+        profile_picture: profilePicture,
       });
 
       if (success) {
-        Alert.alert('Success', 'Profile updated successfully!');
-        // Navigate back with refresh parameter to trigger ProfileScreen refresh
-        navigation.navigate('Profile', { refresh: true });
+        // Force refresh profile data to ensure immediate updates
+        await forceRefreshProfile();
+        
+        Alert.alert('Success', 'Profile updated successfully!', [
+          { text: 'OK', onPress: () => {
+            // Navigate back with refresh parameter to trigger ProfileScreen refresh
+            navigation.navigate('Profile', { refresh: true });
+          }}
+        ]);
       } else {
-        Alert.alert('Error', 'Failed to update profile.');
+        Alert.alert('Error', 'Failed to update profile. Please try again.');
       }
     } catch (error) {
-      console.error('Profile update error:', error);
-      Alert.alert('Error', 'Failed to update profile.');
+      console.error('Unexpected error:', error);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -204,8 +245,9 @@ export default function EditProfileScreen({ navigation }) {
           return;
         }
 
-        // Update state with the new avatar URL
+        // Update state with the new avatar URL and profile picture
         setAvatarUrl(urlData.publicUrl);
+        setProfilePicture(urlData.publicUrl);
 
         Alert.alert('Success', 'Avatar uploaded successfully!');
       }
@@ -285,19 +327,37 @@ export default function EditProfileScreen({ navigation }) {
           <View style={styles.formGroup}>
             <Text style={styles.label}>Username</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, errors.username && styles.inputError]}
               value={username}
               onChangeText={setUsername}
               placeholder='Enter a username'
               placeholderTextColor='#AAAAAA'
               autoCapitalize='none'
             />
+            {errors.username && (
+              <Text style={styles.errorText}>{errors.username}</Text>
+            )}
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Full Name</Text>
+            <TextInput
+              style={[styles.input, errors.fullName && styles.inputError]}
+              value={fullName}
+              onChangeText={setFullName}
+              placeholder='Enter your full name'
+              placeholderTextColor='#AAAAAA'
+              autoCapitalize='words'
+            />
+            {errors.fullName && (
+              <Text style={styles.errorText}>{errors.fullName}</Text>
+            )}
           </View>
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>Bio</Text>
             <TextInput
-              style={[styles.input, styles.textArea]}
+              style={[styles.input, styles.textArea, errors.bio && styles.inputError]}
               value={bio}
               onChangeText={setBio}
               placeholder='Tell us about yourself...'
@@ -306,6 +366,9 @@ export default function EditProfileScreen({ navigation }) {
               numberOfLines={4}
               textAlignVertical='top'
             />
+            {errors.bio && (
+              <Text style={styles.errorText}>{errors.bio}</Text>
+            )}
           </View>
 
           <View style={styles.formGroup}>
@@ -503,6 +566,16 @@ const styles = StyleSheet.create({
   },
   skillLevelNameSelected: {
     color: '#2E7D32',
+  },
+  inputError: {
+    borderColor: '#F44336',
+    borderWidth: 1,
+  },
+  errorText: {
+    color: '#F44336',
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
   },
   skillLevelDescription: {
     fontSize: 14,

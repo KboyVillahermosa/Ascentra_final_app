@@ -125,7 +125,7 @@ export async function createUserProfile(
 ): Promise<{ data: UserProfile | null; error: any }> {
   try {
     const profileData = {
-      user_id: userId, // Use user_id that references auth.users.id
+      id: userId, // Use id that references auth.users.id
       username,
       full_name: fullName || username,
       bio: '', // Default empty bio
@@ -157,7 +157,7 @@ export async function getUserProfile(
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('user_id', userId) // Use user_id to reference auth.users.id
+      .eq('id', userId) // Use id to reference auth.users.id
       .single();
 
     if (error && error.code !== 'PGRST116') {
@@ -177,12 +177,17 @@ export async function handlePostAuthProfile(
   loginMethod: 'email' | 'google',
   username?: string,
   skillLevel?: string,
+  forceRefreshProfile?: () => Promise<void>,
 ): Promise<{ success: boolean; error?: any }> {
   try {
     // Check if profile already exists
     const { data: existingProfile } = await getUserProfile(user.id);
 
     if (existingProfile) {
+      // Force refresh to ensure context is updated
+      if (forceRefreshProfile) {
+        await forceRefreshProfile();
+      }
       return { success: true };
     }
 
@@ -202,6 +207,11 @@ export async function handlePostAuthProfile(
 
     if (error) {
       return { success: false, error };
+    }
+
+    // Force refresh profile context after creation
+    if (forceRefreshProfile) {
+      await forceRefreshProfile();
     }
 
     return { success: true };

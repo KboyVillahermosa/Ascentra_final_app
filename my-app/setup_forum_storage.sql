@@ -10,6 +10,7 @@ ON CONFLICT (id) DO NOTHING;
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
 -- Policy: Allow authenticated users to upload forum media
+DROP POLICY IF EXISTS "Users can upload forum media" ON storage.objects;
 CREATE POLICY "Users can upload forum media" ON storage.objects
 FOR INSERT WITH CHECK (
   bucket_id = 'forum' AND 
@@ -18,6 +19,7 @@ FOR INSERT WITH CHECK (
 );
 
 -- Policy: Allow authenticated users to update their own forum media
+DROP POLICY IF EXISTS "Users can update their own forum media" ON storage.objects;
 CREATE POLICY "Users can update their own forum media" ON storage.objects
 FOR UPDATE USING (
   bucket_id = 'forum' AND 
@@ -30,6 +32,7 @@ FOR UPDATE USING (
 );
 
 -- Policy: Allow authenticated users to delete their own forum media
+DROP POLICY IF EXISTS "Users can delete their own forum media" ON storage.objects;
 CREATE POLICY "Users can delete their own forum media" ON storage.objects
 FOR DELETE USING (
   bucket_id = 'forum' AND 
@@ -38,6 +41,7 @@ FOR DELETE USING (
 );
 
 -- Policy: Allow public read access to all forum media
+DROP POLICY IF EXISTS "Anyone can view forum media" ON storage.objects;
 CREATE POLICY "Anyone can view forum media" ON storage.objects
 FOR SELECT USING (
   bucket_id = 'forum'
